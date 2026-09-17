@@ -4,12 +4,13 @@ import { setActivePinia, createPinia } from 'pinia';
 import Graph from 'graphology';
 
 vi.mock('@/composables/use-tauri-command', () => ({
+  isTauri: () => false,
   tauriCommand: vi.fn(),
 }));
 
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useToast } from '@/composables/use-toast';
-import { useClusterThemes } from '@/composables/use-cluster-themes';
+import { useClusterThemes, useThemesPanel } from '@/composables/use-cluster-themes';
 import type { ClusterMember } from '@/utils/cluster-members';
 
 const mockedCommand = vi.mocked(tauriCommand);
@@ -120,5 +121,126 @@ describe('use-cluster-themes', () => {
     const failed = useToast().toasts.value;
     expect(failed[failed.length - 1]?.message).toBe('Failed to copy to clipboard');
     expect(failed[failed.length - 1]?.type).toBe('error');
+  });
+});
+
+/** Graph with two visible cluster-2 authors + one cluster-5 node. */
+function makeClusterGraph(): Graph {
+  const g = new Graph();
+  g.addNode('author-1', { label: 'Alice', cluster: 2 });
+  g.addNode('author-2', { label: 'Bob', cluster: 2 });
+  g.addNode('other-1', { label: 'Carol', cluster: 5 });
+  return g;
+}
+
+describe('useThemesPanel', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    mockedCommand.mockReset();
+  });
+
+  it('analyze_opens_panel_and_targets_selected_cluster_members', async () => {
+    mockedCommand.mockResolvedValue('# Cluster themes');
+    const selectedClusters = ref<number[]>([2]);
+    const panel = useThemesPanel({
+      networkType: 'co_authorship',
+      recalculateTrigger: ref(0),
+      graph: ref<Graph | null>(makeClusterGraph()),
+      selectedClusters,
+    });
+
+    expect(panel.themesPanelOpen.value).toBe(false);
+    panel.onAnalyzeThemes();
+
+    expect(panel.themesPanelOpen.value).toBe(true);
+    expect(panel.themesClusterIndex.value).toBe(2);
+    expect(mockedCommand).toHaveBeenCalledWith('biblio_analyze_cluster_themes', {
+      networkType: 'co_authorship',
+      clusterIndex: 2,
+      members: [
+        { id: 'author-1', label: 'Alice' },
+        { id: 'author-2', label: 'Bob' },
+      ] satisfies ClusterMember[],
+    });
+  });
+
+  it('analyze_no_op_without_selection_or_graph', () => {
+    const selectedClusters = ref<number[]>([]);
+    const noGraph = useThemesPanel({
+      networkType: 'co_occurrence',
+      recalculateTrigger: ref(0),
+      graph: ref<Graph | null>(null),
+      selectedClusters,
+    });
+    noGraph.onAnalyzeThemes();
+    expect(noGraph.themesPanelOpen.value).toBe(false);
+
+    const withGraph = useThemesPanel({
+      networkType: 'co_occurrence',
+      recalculateTrigger: ref(0),
+      graph: ref<Graph | null>(makeClusterGraph()),
+      selectedClusters: ref<number[]>([]),
+    });
+    withGraph.onAnalyzeThemes();
+    expect(withGraph.themesPanelOpen.value).toBe(false);
+    expect(mockedCommand).not.toHaveBeenCalled();
+  });
+
+  it('analyzeLoading_follows_selected_cluster_not_panel_cluster', async () => {
+    let release: (v: string) => void = () => {};
+    mockedCommand.mockReturnValue(
+      new Promise<string>((resolve) => {
+        release = resolve;
+      })
+    );
+    const selectedClusters = ref<number[]>([2]);
+    const panel = useThemesPanel({
+      networkType: 'co_authorship',
+      recalculateTrigger: ref(0),
+      graph: ref<Graph | null>(makeClusterGraph()),
+      selectedClusters,
+    });
+
+    panel.onAnalyzeThemes();
+    expect(panel.analyzeLoading.value).toBe(true);
+
+    // Legend button tracks the SELECTED cluster: switching to idle cluster 5
+    // re-enables it while cluster 2's analysis is still in flight.
+    selectedClusters.value = [5];
+    expect(panel.analyzeLoading.value).toBe(false);
+
+    release('# done');
+  });
+
+  it('reanalyze_targets_panel_cluster_and_forces_fresh_call', async () => {
+    mockedCommand.mockResolvedValueOnce('# First').mockResolvedValueOnce('# Second');
+    const selectedClusters = ref<number[]>([2]);
+    const panel = useThemesPanel({
+      networkType: 'co_occurrence',
+      recalculateTrigger: ref(0),
+      graph: ref<Graph | null>(makeClusterGraph()),
+      selectedClusters,
+    });
+
+    panel.onAnalyzeThemes();
+    await panel.onReanalyzeThemes();
+
+    expect(mockedCommand).toHaveBeenCalledTimes(2);
+    expect(mockedCommand).toHaveBeenLastCalledWith('biblio_analyze_cluster_themes', {
+      networkType: 'co_occurrence',
+      clusterIndex: 2,
+      members: expect.any(Array),
+    });
+    expect(panel.themesEntry.value.markdown).toBe('# Second');
+  });
+
+  it('themesEntry_is_empty_until_a_cluster_is_analyzed', () => {
+    const panel = useThemesPanel({
+      networkType: 'co_authorship',
+      recalculateTrigger: ref(0),
+      graph: ref<Graph | null>(makeClusterGraph()),
+      selectedClusters: ref<number[]>([]),
+    });
+    expect(panel.themesEntry.value).toEqual({ markdown: null, loading: false, error: null });
   });
 });

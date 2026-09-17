@@ -1,4 +1,4 @@
-import { watch, type Ref } from 'vue';
+import { ref, computed, watch, type Ref } from 'vue';
 import type Graph from 'graphology';
 import {
   clusterThemesKey,
@@ -7,6 +7,8 @@ import {
   type ClusterThemesNetworkType,
 } from '@/stores/cluster-themes';
 import { useToast } from '@/composables/use-toast';
+import { useLlmConfigured } from '@/composables/use-llm-configured';
+import { collectClusterMembers } from '@/utils/cluster-members';
 import type { ClusterMember } from '@/utils/cluster-members';
 
 export interface UseClusterThemesOptions {
@@ -63,4 +65,67 @@ export function useClusterThemes(options: UseClusterThemesOptions) {
   }
 
   return { analyze, reanalyze, entryFor, copyMarkdown };
+}
+
+export interface UseThemesPanelOptions extends UseClusterThemesOptions {
+  /** The view's selected clusters; the legend trigger analyzes `[0]`. */
+  selectedClusters: Ref<number[]>;
+}
+
+/**
+ * Panel-state wrapper over {@link useClusterThemes} shared by the co-authorship
+ * and keyword network views (the two spec 8.8 networks): the canonical
+ * `useLlmConfigured` gate, open/cluster tracking, the legend trigger's loading
+ * state, and the analyze/reanalyze/copy actions.
+ */
+export function useThemesPanel(options: UseThemesPanelOptions) {
+  const llmReady = useLlmConfigured();
+  const themes = useClusterThemes(options);
+  const themesPanelOpen = ref(false);
+  const themesClusterIndex = ref<number | null>(null);
+
+  const themesEntry = computed<ClusterThemesEntry>(() =>
+    themesClusterIndex.value === null
+      ? { markdown: null, loading: false, error: null }
+      : themes.entryFor(themesClusterIndex.value)
+  );
+
+  /* The legend trigger's loading state follows the currently selected cluster,
+   * not the panel's (last analyzed) cluster: reselecting another cluster while
+   * one analysis is in flight must re-enable the button. */
+  const analyzeLoading = computed(() => {
+    const selected = options.selectedClusters.value[0];
+    return selected === undefined ? false : themes.entryFor(selected).loading;
+  });
+
+  function onAnalyzeThemes(): void {
+    const clusterIndex = options.selectedClusters.value[0];
+    if (clusterIndex === undefined || !options.graph.value) return;
+    themesClusterIndex.value = clusterIndex;
+    themesPanelOpen.value = true;
+    const members: ClusterMember[] = collectClusterMembers(options.graph.value, clusterIndex);
+    void themes.analyze(clusterIndex, members);
+  }
+
+  async function onReanalyzeThemes(): Promise<void> {
+    const clusterIndex = themesClusterIndex.value;
+    if (clusterIndex === null || !options.graph.value) return;
+    const members: ClusterMember[] = collectClusterMembers(options.graph.value, clusterIndex);
+    await themes.reanalyze(clusterIndex, members);
+  }
+
+  async function onCopyThemes(markdown: string): Promise<void> {
+    await themes.copyMarkdown(markdown);
+  }
+
+  return {
+    llmReady,
+    themesPanelOpen,
+    themesClusterIndex,
+    themesEntry,
+    analyzeLoading,
+    onAnalyzeThemes,
+    onReanalyzeThemes,
+    onCopyThemes,
+  };
 }

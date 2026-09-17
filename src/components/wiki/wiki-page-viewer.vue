@@ -350,73 +350,19 @@ watch(() => props.slug, loadPage, { immediate: true });
   color: rgb(22 101 52);
 }
 
-.wiki-page-viewer :deep(.wikilink) {
+.wiki-page-viewer :deep(.wikilink:not(.wikilink--synthesis)) {
   color: rgb(79 70 229);
   text-decoration: underline;
   cursor: pointer;
   text-decoration-style: dotted;
 }
 
-.wiki-page-viewer :deep(.wikilink:hover) {
+.wiki-page-viewer :deep(.wikilink:not(.wikilink--synthesis):hover) {
   text-decoration-style: solid;
 }
 
-/* Synthesis-styled wikilink chip (from [^art-uuid]: definition lines). */
-.wiki-page-viewer :deep(.wikilink--synthesis) {
-  display: inline-block;
-  background: rgb(168 85 247 / 0.12); /* purple-500 @ 12% */
-  color: rgb(126 34 206); /* purple-800 */
-  border: 1px solid rgb(168 85 247 / 0.3);
-  padding: 0.0625rem 0.375rem;
-  border-radius: 0.25rem;
-  font-size: 0.8em;
-  font-weight: 500;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.wiki-page-viewer :deep(.wikilink--synthesis:hover) {
-  background: rgb(168 85 247 / 0.2);
-}
-
-.wiki-page-viewer :deep(.art-ref) {
-  display: inline;
-  color: rgb(21 128 61);
-  background: rgb(240 253 244);
-  border: 1px solid rgb(220 252 231);
-  padding: 0 0.3rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  cursor: pointer;
-  text-decoration: none;
-  font-weight: 500;
-}
-
-.wiki-page-viewer :deep(.art-ref:hover) {
-  background: rgb(220 252 231);
-}
-
-.wiki-page-viewer :deep(.art-ref--missing) {
-  color: rgb(148 163 184);
-  background: rgb(241 245 249);
-  border-color: rgb(226 232 240);
-}
-
-/* T2.3 Phase 3: muted section-provenance badge rendered after a wikilink
- * when the citation carries a `(§Section)` suffix (e.g. `[[slug]] (§Methods)`).
- * Keeps the passage locator visible without crowding the chip itself. */
-.wiki-page-viewer :deep(.section-badge) {
-  display: inline-block;
-  margin-left: 0.25rem;
-  padding: 0.0625rem 0.3125rem;
-  font-size: 0.7em;
-  font-weight: 500;
-  color: rgb(100 116 139); /* slate-500 */
-  background: rgb(241 245 249); /* slate-100 */
-  border: 1px solid rgb(226 232 240); /* slate-200 */
-  border-radius: 0.25rem;
-  vertical-align: baseline;
-}
+/* Synthesis wikilink chip + article-ref + section-badge styles are shared
+ * with chat-view in `src/styles/markdown.css` (global). */
 
 /* Search-term highlight (active sidebar search query). */
 .wiki-page-viewer :deep(.wiki-search-highlight) {

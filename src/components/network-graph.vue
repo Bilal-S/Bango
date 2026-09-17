@@ -31,9 +31,9 @@
 </template>
 
 <script setup lang="ts">
-import { watch } from 'vue';
 import type Graph from 'graphology';
 import { useNetworkGraph } from '../composables/use-network-graph';
+import { applyFocusClusterVisualState } from '../utils/network-visual-state';
 import { clusterColor } from '../types/biblio-network';
 import type { CoAuthorNode } from '../types/biblio-network';
 import type { NetworkGraphProps } from '../types/network-graph';
@@ -54,72 +54,31 @@ const { hoveredNode, hasGraph, tooltipPosition, renderer, locateNode, resetZoom,
       defaultEdgeColor: '#e2e8f0',
     },
     mapHoveredNode,
-    /* The co-author graph dispatches its own focus > cluster > clear logic per
-       prop change, so the shared reapply watchers are disabled and installed
-       locally below. */
-    installStandardWatchers: false,
-    onBeforeInit: clearFocusMode,
-    onGraphReady: () => {
-      if (props.focusedNodeId) {
-        applyFocusMode(props.focusedNodeId);
-      }
-    },
+    applyVisualState,
     onNodeClick: (nodeId) => emit('node-click', nodeId),
   });
 
-watch(
-  () => props.focusedNodeId,
-  (newId) => {
-    if (newId) {
-      applyFocusMode(newId);
-    } else {
-      clearFocusMode();
-    }
-  }
-);
+/* Co-author priority: an active focus ignores the cluster selection (the
+   previous local watcher dispatch behaved the same way). The shared
+   composable watchers re-apply on focus/color/cluster/recalculate changes. */
+function applyVisualState() {
+  if (!props.graph) return;
+  applyFocusClusterVisualState(
+    props.graph,
+    {
+      focusedNodeId: props.focusedNodeId,
+      selectedClusters: props.focusedNodeId ? [] : props.selectedClusters,
+    },
+    { getNodeColor, getNodeSize: coAuthorNodeSize, idleEdgeColor: '#e2e8f0' }
+  );
+}
 
-watch(
-  () => props.colorMode,
-  () => {
-    if (props.focusedNodeId) {
-      applyFocusMode(props.focusedNodeId);
-    } else if (props.selectedClusters.length > 0) {
-      applyClusterHighlight(props.selectedClusters);
-    } else {
-      clearFocusMode();
-    }
-  }
-);
-
-watch(
-  () => props.selectedClusters,
-  (clusters) => {
-    if (props.focusedNodeId) {
-      // Focus mode takes priority; re-apply it
-      applyFocusMode(props.focusedNodeId);
-    } else if (clusters.length > 0) {
-      applyClusterHighlight(clusters);
-    } else {
-      clearFocusMode();
-    }
-  },
-  { deep: true }
-);
-
-watch(
-  () => props.recalculateTrigger,
-  () => {
-    if (props.graph) {
-      if (props.focusedNodeId) {
-        applyFocusMode(props.focusedNodeId);
-      } else if (props.selectedClusters.length > 0) {
-        applyClusterHighlight(props.selectedClusters);
-      } else {
-        clearFocusMode();
-      }
-    }
-  }
-);
+/** Node sizing: weight-scaled 3-20 (flat range: 10). */
+function coAuthorNodeSize(node: string, minW: number, maxW: number): number {
+  const g = props.graph!;
+  const weight = (g.getNodeAttribute(node, 'weight') as number) ?? 1;
+  return minW === maxW ? 10 : 3 + ((weight - minW) / (maxW - minW)) * 17;
+}
 
 function getNodeColor(nodeId: string): string {
   if (!props.graph || !props.graph.hasNode(nodeId)) return '#94a3b8';
@@ -151,71 +110,4 @@ defineExpose({
   refresh,
   renderer,
 });
-
-function applyClusterHighlight(clusterIds: number[]) {
-  if (!props.graph) return;
-  const g = props.graph;
-  const clusterSet = new Set(clusterIds);
-
-  g.forEachNode((n) => {
-    const cluster = g.getNodeAttribute(n, 'cluster') as number | null;
-    const isInCluster = cluster !== null && clusterSet.has(cluster);
-    const baseColor = getNodeColor(n);
-    g.setNodeAttribute(n, 'color', isInCluster ? baseColor : `${baseColor}26`);
-    const origSize = g.getNodeAttribute(n, 'size') ?? 5;
-    g.setNodeAttribute(n, 'size', isInCluster ? origSize : origSize * 0.6);
-  });
-
-  g.forEachEdge((_edge, _attrs, source, target) => {
-    const sCluster = g.getNodeAttribute(source, 'cluster') as number | null;
-    const tCluster = g.getNodeAttribute(target, 'cluster') as number | null;
-    const bothInCluster =
-      sCluster !== null &&
-      tCluster !== null &&
-      clusterSet.has(sCluster) &&
-      clusterSet.has(tCluster);
-    g.setEdgeAttribute(_edge as string, 'color', bothInCluster ? '#94a3b8' : '#f1f5f9');
-  });
-}
-
-function applyFocusMode(nodeId: string) {
-  if (!props.graph || !renderer.value) return;
-  const g = props.graph;
-  if (!g.hasNode(nodeId)) return;
-  const neighbors = new Set(g.neighbors(nodeId));
-  neighbors.add(nodeId);
-
-  g.forEachNode((n) => {
-    const isNeighbor = neighbors.has(n);
-    const baseColor = getNodeColor(n);
-    g.setNodeAttribute(n, 'color', isNeighbor ? baseColor : `${baseColor}26`);
-    const origSize = g.getNodeAttribute(n, 'size') ?? 5;
-    g.setNodeAttribute(n, 'size', isNeighbor ? origSize : origSize * 0.6);
-  });
-
-  g.forEachEdge((_edge, _attrs, source, target) => {
-    const isConnected = neighbors.has(source) && neighbors.has(target);
-    g.setEdgeAttribute(_edge as string, 'color', isConnected ? '#94a3b8' : '#f1f5f9');
-  });
-}
-
-function clearFocusMode() {
-  if (!props.graph) return;
-  const g = props.graph;
-  const weights: number[] = [];
-  g.forEachNode((n) => weights.push(g.getNodeAttribute(n, 'weight') ?? 1));
-  const minW = Math.min(...weights, 1);
-  const maxW = Math.max(...weights, 1);
-
-  g.forEachNode((n) => {
-    g.setNodeAttribute(n, 'color', getNodeColor(n));
-    const weight = g.getNodeAttribute(n, 'weight') ?? 1;
-    const size = minW === maxW ? 10 : 3 + ((weight - minW) / (maxW - minW)) * 17;
-    g.setNodeAttribute(n, 'size', size);
-  });
-
-  g.forEachEdge((e) => {
-    g.setEdgeAttribute(e as string, 'color', '#e2e8f0');
-  });
-}
 </script>

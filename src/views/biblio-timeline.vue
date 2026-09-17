@@ -6,7 +6,8 @@ import type { ApexOptions, ApexTooltipCustomOpts, ApexYAxis } from 'apexcharts';
 import { useBibliometrics } from '@/composables/use-bibliometrics';
 import { useTimelineState } from '@/composables/use-timeline-state';
 import { useViewport } from '@/composables/use-viewport';
-import { tauriCommand } from '@/composables/use-tauri-command';
+import { saveChartPng, saveChartSvg } from '../utils/network-export';
+import '../styles/biblio-chrome.css';
 import { buildBiblioArticleQuery } from '@/utils/biblio-links';
 import JournalInfoCard from '@/components/journal-info-card.vue';
 
@@ -596,19 +597,11 @@ function onExport(format: 'png' | 'svg'): void {
 // ── Export via ApexCharts dataURI + Tauri save dialog ──────────
 async function handleExportPng(): Promise<void> {
   try {
-    const chart = chartRef.value;
+    const chart = chartRef.value as unknown as {
+      dataURI: () => Promise<{ imgURI: string }>;
+    } | null;
     if (!chart) return;
-    const result = await (
-      chart as unknown as { dataURI: () => Promise<{ imgURI: string }> }
-    ).dataURI();
-    const { save } = await import('@tauri-apps/plugin-dialog');
-    const filePath = await save({
-      defaultPath: 'publication-timeline.png',
-      filters: [{ name: 'PNG Image', extensions: ['png'] }],
-    });
-    if (!filePath) return;
-    const base64 = result.imgURI.split(',')[1] ?? '';
-    await tauriCommand('write_base64_to_file', { path: filePath, data: base64 });
+    await saveChartPng(chart, 'publication-timeline.png');
   } catch (e) {
     console.error('PNG export failed', e);
   }
@@ -616,25 +609,12 @@ async function handleExportPng(): Promise<void> {
 
 async function handleExportSvg(): Promise<void> {
   try {
-    /* ApexCharts dataURI({ fileExt: 'svg' }) is unreliable in vue3-apexcharts.
-     * Serialize the chart's SVG DOM element directly via XMLSerializer. */
-    const chartEl = document.querySelector('.chart-primary svg');
-    if (!chartEl) {
+    /* ApexCharts dataURI({ fileExt: 'svg' }) is unreliable in vue3-apexcharts;
+     * the shared helper serializes the chart's SVG DOM element directly. */
+    const ok = await saveChartSvg('.chart-primary svg', 'publication-timeline.svg');
+    if (!ok && !document.querySelector('.chart-primary svg')) {
       console.error('SVG export failed: chart SVG element not found');
-      return;
     }
-    const clone = chartEl.cloneNode(true) as SVGElement;
-    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-    const svgString = new XMLSerializer().serializeToString(clone);
-
-    const { save } = await import('@tauri-apps/plugin-dialog');
-    const filePath = await save({
-      defaultPath: 'publication-timeline.svg',
-      filters: [{ name: 'SVG', extensions: ['svg'] }],
-    });
-    if (!filePath) return;
-    await tauriCommand('write_text_to_file', { path: filePath, content: svgString });
   } catch (e) {
     console.error('SVG export failed', e);
   }
@@ -1348,105 +1328,6 @@ onUnmounted(() => {
   background: var(--color-outline-variant);
 }
 
-.sidebar__action-btn .material-symbols-outlined {
-  font-size: 1rem;
-}
-
-.sidebar__action-caret {
-  margin-left: auto;
-}
-
-.sidebar__export-menu {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: calc(100% + 0.25rem);
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  background: var(--color-surface-container-lowest);
-  border: 1px solid var(--color-outline-variant);
-  border-radius: 0.5rem;
-  box-shadow: 0 4px 12px rgb(15 23 42 / 0.12);
-  overflow: hidden;
-  z-index: 40;
-}
-
-.sidebar__export-menu li {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.75rem;
-  color: var(--color-on-surface-variant);
-  cursor: pointer;
-  transition: background-color 0.15s;
-}
-
-.sidebar__export-menu li:hover {
-  background: var(--color-surface-container);
-}
-
-.sidebar__export-menu li .material-symbols-outlined {
-  font-size: 1rem;
-  color: var(--color-on-surface-variant);
-}
-
-/* ── Drawer handle ───────────────────────────────────────────── */
-.drawer-handle {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 30;
-  width: 14px;
-  height: 72px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-surface-container-low);
-  border: 1px solid var(--color-outline-variant);
-  border-left: none;
-  border-radius: 0 8px 8px 0;
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
-  cursor: pointer;
-  transition:
-    left 0.3s,
-    background-color 0.15s,
-    border-color 0.15s,
-    width 0.15s;
-}
-
-.drawer-handle:hover {
-  background: var(--color-surface-container);
-  border-color: var(--color-primary);
-  width: 16px;
-}
-
-.drawer-handle-grip {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  align-items: center;
-}
-
-.drawer-handle-grip::before,
-.drawer-handle-grip::after,
-.drawer-handle-grip {
-  content: '';
-  display: block;
-  width: 4px;
-  height: 2px;
-  border-radius: 1px;
-  background: #94a3b8;
-  transition: background-color 0.15s;
-}
-
-.drawer-handle:hover .drawer-handle-grip::before,
-.drawer-handle:hover .drawer-handle-grip::after,
-.drawer-handle:hover .drawer-handle-grip {
-  background: var(--color-primary);
-}
-
 /* ── Main ────────────────────────────────────────────────────── */
 .timeline-main {
   flex: 1;
@@ -1842,18 +1723,5 @@ onUnmounted(() => {
 
 .year-panel__view-btn .material-symbols-outlined {
   font-size: 1.125rem;
-}
-
-/* ── Detail slide transition ─────────────────────────────────── */
-.detail-slide-enter-active,
-.detail-slide-leave-active {
-  transition:
-    transform 0.25s ease,
-    opacity 0.25s ease;
-}
-.detail-slide-enter-from,
-.detail-slide-leave-to {
-  transform: translateX(100%);
-  opacity: 0;
 }
 </style>

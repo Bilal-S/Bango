@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useToast } from '@/composables/use-toast';
+import '@/styles/ai-critique.css';
 import type {
   SearchStrategyResult,
   StrategiesByDatabase,
@@ -148,64 +149,9 @@ async function copy(label: string, text: string): Promise<void> {
 </template>
 
 <style scoped>
-/* Re-declare the `.ai-critique-card__*` layout/typography rules locally.
- * Vue scoped CSS does not cross into child component internals (only the
- * child's root inherits the parent's scope), so the classes from
- * `criteria-editor.vue`'s scoped block do not reach these elements. Values
- * are identical so the card stays visually consistent with the
- * inclusion/exclusion critique cards. */
-.ai-critique-card__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.75rem;
-}
-
-.ai-critique-card__title-group {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: #6b21a8;
-}
-
-.ai-critique-card__title-group .material-symbols-outlined {
-  font-size: 20px;
-}
-
-.ai-critique-card__title {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.ai-critique-card__dismiss {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: #94a3b8;
-  padding: 0.25rem;
-  border-radius: 0.25rem;
-  display: flex;
-  align-items: center;
-  transition:
-    color 0.15s,
-    background-color 0.15s;
-}
-
-.ai-critique-card__dismiss:hover {
-  color: #ba1a1a;
-  background-color: #fef2f2;
-}
-
-.ai-critique-card__dismiss .material-symbols-outlined {
-  font-size: 18px;
-}
-
-.ai-critique-card__body {
-  font-size: 14px;
-  line-height: 22px;
-  color: #1b1b24;
-}
-
+/* Shared `.ai-critique-card__*` chrome lives in `src/styles/ai-critique.css`
+ * (global, so it reaches this component's card markup without a scoped
+ * re-declaration; values unified with criteria-editor's cards). */
 .search-strategy-card__header-actions {
   display: flex;
   align-items: center;

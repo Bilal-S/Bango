@@ -33,10 +33,15 @@ views, LLM config, wiki, dashboard, saved reports, and the startup upgrade.
   keyword networks). It owns the centralized cache-invalidation watch
   (array-of-getters on `recalculateTrigger` + graph identity) and the
   protocol-registry wiring (`author:` -> focus+locate, `article:` -> the
-  hosting view's in-view article detail slide-over). Its `copyMarkdown`
+  hosting view's in-view article detail slide-over). `useThemesPanel()` is
+  the panel-state wrapper both views consume (LLM gate, open/cluster
+  tracking, analyze/reanalyze/copy actions). Its `copyMarkdown`
   export wraps the clipboard write with a success/error toast
   (search-strategy-card precedent) so a rejected write never surfaces as an
   unhandled promise rejection.
+- `use-article-detail-overlay.ts` owns the `ArticleDetailSlideOver` overlay
+  guards (show + full-screen refs + handlers) shared by the biblio network
+  views.
 - `use-dashboard-cta.ts` + `use-dashboard-activity.ts` sit behind
   `use-dashboard`.
 - `use-ai-summary.ts` is the AI-summary submission layer: module-level

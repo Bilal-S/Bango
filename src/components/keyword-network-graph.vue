@@ -54,6 +54,7 @@
 import { computed } from 'vue';
 import type Graph from 'graphology';
 import { useNetworkGraph } from '../composables/use-network-graph';
+import { applyFocusClusterVisualState } from '../utils/network-visual-state';
 import { clusterColor } from '../types/biblio-network';
 import type { KeywordNode } from '../types/biblio-keyword';
 import type { NetworkGraphProps } from '../types/network-graph';
@@ -83,83 +84,24 @@ const { hoveredNode, hasGraph, tooltipPosition, renderer, locateNode, resetZoom,
 /** Average occurrences per year for the hovered node (null when no year data). */
 const hoveredAvgPerYear = computed(() => avgPerYear(hoveredNode.value?.yearCounts));
 
+/** Node sizing: weight-scaled 5-25 (flat range: 12). */
+function getNodeSize(node: string, minW: number, maxW: number): number {
+  const g = props.graph!;
+  const weight = (g.getNodeAttribute(node, 'weight') as number) ?? 1;
+  return minW === maxW ? 12 : 5 + ((weight - minW) / (maxW - minW)) * 20;
+}
+
+/** Shared focus/cluster dimming pass; refreshes the renderer when done. */
 function applyVisualState() {
   if (!props.graph) return;
-  const g = props.graph;
-
-  const isFocusActive = !!props.focusedNodeId;
-  const isClusterActive = props.selectedClusters.length > 0;
-
-  let focusNeighborsSet = new Set<string>();
-  if (props.focusedNodeId && g.hasNode(props.focusedNodeId)) {
-    const focusId = props.focusedNodeId;
-    focusNeighborsSet = new Set([...g.neighbors(focusId), focusId]);
-  }
-
-  const selectedClustersSet = new Set(props.selectedClusters);
-
-  // Pre-calculate weight boundaries
-  const weights: number[] = [];
-  g.forEachNode((n) => {
-    weights.push(g.getNodeAttribute(n, 'weight') ?? 1);
-  });
-  const minW = Math.min(...weights, 1);
-  const maxW = Math.max(...weights, 1);
-
-  // Apply colors and sizes to nodes
-  g.forEachNode((n) => {
-    const baseColor = getNodeColor(n);
-    const weight = g.getNodeAttribute(n, 'weight') ?? 1;
-
-    // Node sizes
-    const baseSize = minW === maxW ? 12 : 5 + ((weight - minW) / (maxW - minW)) * 20;
-
-    const isFocusedDimmed = isFocusActive && !focusNeighborsSet.has(n);
-    const isInClusterDimmed =
-      isClusterActive &&
-      (g.getNodeAttribute(n, 'cluster') === null ||
-        !selectedClustersSet.has(g.getNodeAttribute(n, 'cluster') as number));
-
-    const isDimmed = isFocusedDimmed || isInClusterDimmed;
-
-    if (isDimmed) {
-      g.setNodeAttribute(n, 'color', `${baseColor}26`); // 15% opacity
-      g.setNodeAttribute(n, 'size', baseSize * 0.6);
-    } else {
-      g.setNodeAttribute(n, 'color', baseColor);
-      g.setNodeAttribute(n, 'size', baseSize);
-    }
-  });
-
-  // Apply colors and thickness to edges
-  g.forEachEdge((edge, _attrs, source, target) => {
-    const isFocusedEdgeDimmed =
-      isFocusActive && (!focusNeighborsSet.has(source) || !focusNeighborsSet.has(target));
-
-    let isClusterEdgeDimmed = false;
-    if (isClusterActive) {
-      const sCluster = g.getNodeAttribute(source, 'cluster') as number | null;
-      const tCluster = g.getNodeAttribute(target, 'cluster') as number | null;
-      isClusterEdgeDimmed =
-        sCluster === null ||
-        tCluster === null ||
-        !selectedClustersSet.has(sCluster) ||
-        !selectedClustersSet.has(tCluster);
-    }
-
-    const isDimmedEdge = isFocusedEdgeDimmed || isClusterEdgeDimmed;
-
-    if (isDimmedEdge) {
-      g.setEdgeAttribute(edge, 'color', '#f1f5f9');
-    } else {
-      if (isFocusActive || isClusterActive) {
-        g.setEdgeAttribute(edge, 'color', '#94a3b8');
-      } else {
-        g.setEdgeAttribute(edge, 'color', '#cbd5e1');
-      }
-    }
-  });
-
+  applyFocusClusterVisualState(
+    props.graph,
+    {
+      focusedNodeId: props.focusedNodeId,
+      selectedClusters: props.selectedClusters,
+    },
+    { getNodeColor, getNodeSize }
+  );
   renderer.value?.refresh();
 }
 

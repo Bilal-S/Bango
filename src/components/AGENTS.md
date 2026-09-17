@@ -229,9 +229,16 @@ scaffolding instead of duplicating it:
   (rAF-deferred init with unmount guards, container via
   `useTemplateRef('sigmaContainer')`), hover-tooltip state, sigma event
   bindings, and the standard reapply watchers (focusedNodeId, colorMode,
-  selectedClusters, recalculateTrigger). The co-author graph passes
-  `installStandardWatchers: false` plus `onBeforeInit`/`onGraphReady` because
-  it dispatches its own focus > cluster > clear logic per prop change.
+  selectedClusters, recalculateTrigger). Every graph component uses the
+  standard watchers + `applyVisualState` (the co-author graph's former
+  custom dispatch was folded into the shared path).
+- `utils/network-visual-state.ts::applyFocusClusterVisualState` is the single
+  focus/cluster dimming pass (base color/size via domain config, 15% alpha +
+  0.6x for dimmed nodes, optional edge-thickness pass). The co-author,
+  keyword, and cocitation graphs configure it with their sizing strategy
+  (weight-scaled 3-20 / 12-flat / stored size) and edge colors; the citation
+  graph keeps its own pass because isolation + Main Path (SPC) priority is
+  interwoven with its dimming decisions.
 - `components/graph-status-overlay.vue` renders the loading/error/empty
   chain; only the hover tooltip stays in each domain component.
 - `types/network-graph.ts` (`NetworkGraphProps`, `NetworkColorMode`,

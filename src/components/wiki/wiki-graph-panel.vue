@@ -4,6 +4,7 @@ import Graph from 'graphology';
 import Sigma from 'sigma';
 import { NodeCircleProgram, createEdgeArrowProgram } from 'sigma/rendering';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
+import { applyMinimumSeparation, spiralPosition } from '../../utils/graph-layout';
 import { useWiki } from '@/composables/use-wiki';
 import type { WikiGraph } from '@/types/wiki';
 
@@ -301,10 +302,16 @@ function renderInner(): void {
   const g = new Graph({ multi: false, type: 'directed' });
 
   // Add nodes. The on-canvas label is truncated to 25 chars; the full title +
-  // summary are stored as attributes for the hover tooltip.
+  // summary are stored as attributes for the hover tooltip. Seeding is the
+  // deterministic sunflower spiral (not Math.random): random seeds can drop
+  // two nodes nearly coincident, and ForceAtlas2 then leaves them stuck in a
+  // label-overlapping local minimum.
+  const totalNodes = graph.value.nodes.length;
+  let seedIndex = 0;
   for (const node of graph.value.nodes) {
     const color = typeColors[node.pageType] ?? '#94a3b8';
     const size = 5 + Math.min(Math.max(node.inbound, node.outbound), 10);
+    const seed = spiralPosition(seedIndex++, totalNodes);
     g.addNode(node.slug, {
       label: truncateLabel(node.title),
       fullTitle: node.title,
@@ -312,8 +319,8 @@ function renderInner(): void {
       size,
       color,
       origColor: color,
-      x: Math.random() * 100,
-      y: Math.random() * 100,
+      x: seed.x,
+      y: seed.y,
       pageType: node.pageType,
       inbound: node.inbound,
       outbound: node.outbound,
@@ -350,6 +357,10 @@ function renderInner(): void {
       barnesHutOptimize: g.order > 200,
     },
   });
+
+  // Post-layout guard: push apart any nodes FA2 left (nearly) coincident so
+  // their labels never stack (default min spacing = 1% of graph extent).
+  applyMinimumSeparation(g);
 
   // Store reference for filtering.
   graphologyGraph = g;

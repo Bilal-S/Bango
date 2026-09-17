@@ -10,10 +10,10 @@ import { useCoAuthorNetwork } from '../composables/use-coauthor-network';
 import { useNetworkView } from '../composables/use-network-view';
 import { useNetworkLayout } from '../composables/use-network-layout';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
-import { useClusterThemes } from '../composables/use-cluster-themes';
-import { useLlmConfigured } from '../composables/use-llm-configured';
-import { collectClusterMembers } from '@/utils/cluster-members';
+import { useThemesPanel } from '../composables/use-cluster-themes';
+import { useArticleDetailOverlay } from '../composables/use-article-detail-overlay';
 import { buildBiblioArticleQuery } from '@/utils/biblio-links';
+import '../styles/biblio-chrome.css';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { CoAuthorNode } from '../types/biblio-network';
 
@@ -54,73 +54,36 @@ const { runForceAtlas2Async } = useNetworkLayout();
 const { applyGraphFilters } = useSigmaRenderer();
 
 /* ── Cluster thematic analysis ─────────────────────────────────────────
- * The canonical LLM gate hides the trigger; the store caches per
- * `networkType:clusterIndex` and the composable centralizes invalidation on
- * any recalculate/layout change (Louvain indices are not stable). */
-const llmReady = useLlmConfigured();
-const themes = useClusterThemes({
+ * Shared panel wiring: the canonical LLM gate, the per-cluster session
+ * cache, and the open/reanalyze/copy actions (see use-cluster-themes.ts). */
+const {
+  llmReady,
+  themesPanelOpen,
+  themesClusterIndex,
+  themesEntry,
+  analyzeLoading,
+  onAnalyzeThemes,
+  onReanalyzeThemes,
+  onCopyThemes,
+} = useThemesPanel({
   networkType: 'co_authorship',
   recalculateTrigger,
   graph,
+  selectedClusters,
 });
-const themesPanelOpen = ref(false);
-const themesClusterIndex = ref<number | null>(null);
-
-const themesEntry = computed(() =>
-  themesClusterIndex.value === null
-    ? { markdown: null, loading: false, error: null }
-    : themes.entryFor(themesClusterIndex.value)
-);
-
-/* The legend trigger's loading state follows the currently selected cluster,
- * not the panel's (last analyzed) cluster: reselecting another cluster while
- * one analysis is in flight must re-enable the button. */
-const analyzeLoading = computed(() => {
-  const selected = selectedClusters.value[0];
-  return selected === undefined ? false : themes.entryFor(selected).loading;
-});
-
-function onAnalyzeThemes(): void {
-  const clusterIndex = selectedClusters.value[0];
-  if (clusterIndex === undefined || !graph.value) return;
-  themesClusterIndex.value = clusterIndex;
-  themesPanelOpen.value = true;
-  const members = collectClusterMembers(graph.value, clusterIndex);
-  void themes.analyze(clusterIndex, members);
-}
-
-async function onReanalyzeThemes(): Promise<void> {
-  const clusterIndex = themesClusterIndex.value;
-  if (clusterIndex === null || !graph.value) return;
-  const members = collectClusterMembers(graph.value, clusterIndex);
-  await themes.reanalyze(clusterIndex, members);
-}
-
-async function onCopyThemes(markdown: string): Promise<void> {
-  await themes.copyMarkdown(markdown);
-}
 
 /* ── Article detail slide-over ───────────────────────────────────────────
- * Shared component owns the useArticleSearch wiring + panel lifecycle; the
- * view only keeps the overlay guards so `article:` links open the full
- * article detail without leaving the view (closing returns to the exact
- * network state: graph, cluster selection, cached analysis). */
-const articleDetailRef = ref<InstanceType<typeof ArticleDetailSlideOver> | null>(null);
-const showArticleDetail = ref(false);
-const isArticleDetailFullScreen = ref(false);
-
-function onArticleDetailOpened(): void {
-  showArticleDetail.value = true;
-}
-
-function onArticleDetailClosed(): void {
-  showArticleDetail.value = false;
-  isArticleDetailFullScreen.value = false;
-}
-
-function onArticleDetailToggleFullScreen(): void {
-  isArticleDetailFullScreen.value = !isArticleDetailFullScreen.value;
-}
+ * Shared component + shared overlay guards: `article:` links open the full
+ * article detail without leaving the view; closing returns to the exact
+ * network state (graph, cluster selection, cached analysis). */
+const {
+  articleDetailRef,
+  showArticleDetail,
+  isArticleDetailFullScreen,
+  onArticleDetailOpened,
+  onArticleDetailClosed,
+  onArticleDetailToggleFullScreen,
+} = useArticleDetailOverlay();
 
 /* Protocol registry injected into the panel: author -> focus + locate,
  * article -> full in-view article detail slide-over (no route change, so the
@@ -241,7 +204,7 @@ function viewAuthorArticles(): void {
 </script>
 
 <template>
-  <div class="coauthor-layout">
+  <div class="network-view-layout">
     <!-- Sidebar Wrapper -->
     <div
       class="sidebar-wrapper relative transition-all duration-300 shrink-0"
@@ -346,73 +309,3 @@ function viewAuthorArticles(): void {
     />
   </div>
 </template>
-
-<style scoped>
-.coauthor-layout {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  position: relative;
-}
-
-.sidebar-panel {
-  z-index: 20;
-}
-
-/* Drawer handle - small pill tab positioned at sidebar edge */
-.drawer-handle {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 30;
-  width: 14px;
-  height: 72px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-surface-container-low);
-  border: 1px solid var(--color-outline-variant);
-  border-left: none;
-  border-radius: 0 8px 8px 0;
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
-  cursor: pointer;
-  transition:
-    left 0.3s,
-    background-color 0.15s,
-    border-color 0.15s,
-    width 0.15s;
-}
-
-.drawer-handle:hover {
-  background: var(--color-surface-container);
-  border-color: var(--color-primary);
-  width: 16px;
-}
-
-/* Grip dots inside the handle */
-.drawer-handle-grip {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  align-items: center;
-}
-
-.drawer-handle-grip::before,
-.drawer-handle-grip::after,
-.drawer-handle-grip {
-  content: '';
-  display: block;
-  width: 4px;
-  height: 2px;
-  border-radius: 1px;
-  background: #94a3b8;
-  transition: background-color 0.15s;
-}
-
-.drawer-handle:hover .drawer-handle-grip::before,
-.drawer-handle:hover .drawer-handle-grip::after,
-.drawer-handle:hover .drawer-handle-grip {
-  background: var(--color-primary);
-}
-</style>

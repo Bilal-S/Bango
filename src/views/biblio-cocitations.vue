@@ -14,6 +14,7 @@ import { useToast } from '../composables/use-toast';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { CocitationNode, CocitationEdge } from '../types/biblio-cocitation';
+import '../styles/biblio-chrome.css';
 
 const toast = useToast();
 
@@ -293,7 +294,7 @@ async function onResetAnalysis() {
 </script>
 
 <template>
-  <div class="cocitation-layout">
+  <div class="network-view-layout">
     <!-- Sidebar Wrapper -->
     <div
       class="sidebar-wrapper relative transition-all duration-300 shrink-0"
@@ -488,73 +489,6 @@ async function onResetAnalysis() {
 </template>
 
 <style scoped>
-.cocitation-layout {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  position: relative;
-}
-
-.sidebar-panel {
-  z-index: 20;
-}
-
-/* Drawer handle */
-.drawer-handle {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 30;
-  width: 14px;
-  height: 72px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-surface-container-low);
-  border: 1px solid var(--color-outline-variant);
-  border-left: none;
-  border-radius: 0 8px 8px 0;
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
-  cursor: pointer;
-  transition:
-    left 0.3s,
-    background-color 0.15s,
-    border-color 0.15s,
-    width 0.15s;
-}
-
-.drawer-handle:hover {
-  background: var(--color-surface-container);
-  border-color: var(--color-primary);
-  width: 16px;
-}
-
-.drawer-handle-grip {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  align-items: center;
-}
-
-.drawer-handle-grip::before,
-.drawer-handle-grip::after,
-.drawer-handle-grip {
-  content: '';
-  display: block;
-  width: 4px;
-  height: 2px;
-  border-radius: 1px;
-  background: #94a3b8;
-  transition: background-color 0.15s;
-}
-
-.drawer-handle:hover .drawer-handle-grip::before,
-.drawer-handle:hover .drawer-handle-grip::after,
-.drawer-handle:hover .drawer-handle-grip {
-  background: var(--color-primary);
-}
-
 /* Heatmap slide transition */
 .heatmap-slide-enter-active,
 .heatmap-slide-leave-active {
@@ -568,19 +502,5 @@ async function onResetAnalysis() {
   max-height: 0;
   opacity: 0;
   overflow: hidden;
-}
-
-/* Detail panel slide transition */
-.detail-slide-enter-active,
-.detail-slide-leave-active {
-  transition:
-    transform 0.25s ease,
-    opacity 0.25s ease;
-}
-
-.detail-slide-enter-from,
-.detail-slide-leave-to {
-  transform: translateX(100%);
-  opacity: 0;
 }
 </style>

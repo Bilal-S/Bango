@@ -21,7 +21,12 @@ vi.mock('@sigma/export-image', () => ({
 }));
 
 // ── Import after mocks ──────────────────────────────────────────────────
-import { exportNetworkPng, exportNetworkGexf } from '../utils/network-export';
+import {
+  exportNetworkPng,
+  exportNetworkGexf,
+  saveChartPng,
+  saveChartSvg,
+} from '../utils/network-export';
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 function makeSmallGraph(): Graph {
@@ -133,5 +138,78 @@ describe('exportNetworkGexf', () => {
     const xml = (args as Record<string, unknown>).content as string;
     expect(xml).toContain('Alice');
     expect(xml).toContain('Bob');
+  });
+});
+
+describe('saveChartPng (ApexCharts biblio views)', () => {
+  it('returns false when user cancels the save dialog', async () => {
+    mockSave.mockResolvedValue(null);
+    const chart = { dataURI: vi.fn() };
+
+    const result = await saveChartPng(chart, 'author-scatter.png');
+
+    expect(result).toBe(false);
+    expect(chart.dataURI).not.toHaveBeenCalled();
+    expect(mockTauriCommand).not.toHaveBeenCalled();
+  });
+
+  it('writes the data URI payload (minus prefix) via write_base64_to_file', async () => {
+    mockSave.mockResolvedValue('/home/user/Pictures/author-scatter.png');
+    mockTauriCommand.mockResolvedValue(undefined);
+    const chart = { dataURI: vi.fn().mockResolvedValue({ imgURI: 'data:image/png;base64,QUJD' }) };
+
+    const result = await saveChartPng(chart, 'author-scatter.png');
+
+    expect(result).toBe(true);
+    expect(mockSave).toHaveBeenCalledWith({
+      defaultPath: 'author-scatter.png',
+      filters: [{ name: 'PNG Image', extensions: ['png'] }],
+    });
+    const [cmd, args] = mockTauriCommand.mock.calls[0]!;
+    expect(cmd).toBe('write_base64_to_file');
+    expect(args).toHaveProperty('path', '/home/user/Pictures/author-scatter.png');
+    expect(args).toHaveProperty('data', 'QUJD');
+  });
+});
+
+describe('saveChartSvg (ApexCharts biblio views)', () => {
+  function mountSvg(): void {
+    document.body.innerHTML = '<div class="scatter-chart"><svg><title>Chart</title></svg></div>';
+  }
+
+  it('returns false without a dialog when the SVG element is missing', async () => {
+    document.body.innerHTML = '';
+    const result = await saveChartSvg('.scatter-chart svg', 'author-scatter.svg');
+
+    expect(result).toBe(false);
+    expect(mockSave).not.toHaveBeenCalled();
+    expect(mockTauriCommand).not.toHaveBeenCalled();
+  });
+
+  it('returns false when the user cancels the save dialog', async () => {
+    mountSvg();
+    mockSave.mockResolvedValue(null);
+
+    const result = await saveChartSvg('.scatter-chart svg', 'author-scatter.svg');
+
+    expect(result).toBe(false);
+    expect(mockTauriCommand).not.toHaveBeenCalled();
+  });
+
+  it('serializes the SVG with xmlns attrs and writes via write_text_to_file', async () => {
+    mountSvg();
+    mockSave.mockResolvedValue('/home/user/Pictures/author-scatter.svg');
+    mockTauriCommand.mockResolvedValue(undefined);
+
+    const result = await saveChartSvg('.scatter-chart svg', 'author-scatter.svg');
+
+    expect(result).toBe(true);
+    const [cmd, args] = mockTauriCommand.mock.calls[0]!;
+    expect(cmd).toBe('write_text_to_file');
+    expect(args).toHaveProperty('path', '/home/user/Pictures/author-scatter.svg');
+    const content = (args as Record<string, unknown>).content as string;
+    expect(content).toContain('<svg');
+    expect(content).toContain('xmlns="http://www.w3.org/2000/svg"');
+    expect(content).toContain('xmlns:xlink="http://www.w3.org/1999/xlink"');
   });
 });

@@ -84,14 +84,8 @@ export type ReferenceType = 'citation' | 'reference';
 /** Match status for a reference against the article library */
 export type MatchStatus = 'unmatched' | 'matched' | 'not_in_library' | 'imported';
 
-/** A citation or reference associated with an article */
-export interface ArticleReference {
-  id: string;
-  referenceType: ReferenceType;
-  parentId: string;
-  matchStatus: MatchStatus;
-  /** ID of the article this reference was matched/promoted to (null if unmatched) */
-  matchedArticleId: string | null;
+/** Shared bibliographic fields for reference-paper-like records. */
+export interface BibliographicFields {
   title: string | null;
   abstractText: string | null;
   authors: string[];
@@ -106,6 +100,16 @@ export interface ArticleReference {
   url: string | null;
   language: string | null;
   publisher: string | null;
+}
+
+/** A citation or reference associated with an article */
+export interface ArticleReference extends BibliographicFields {
+  id: string;
+  referenceType: ReferenceType;
+  parentId: string;
+  matchStatus: MatchStatus;
+  /** ID of the article this reference was matched/promoted to (null if unmatched) */
+  matchedArticleId: string | null;
   numCited: number | null;
   numReferences: number | null;
   hasFullText: boolean;
@@ -288,22 +292,8 @@ export interface ScreeningReadiness {
 }
 
 /** A reference paper from the global reference_papers table (for References tab) */
-export interface ReferencePaperQuery {
+export interface ReferencePaperQuery extends BibliographicFields {
   id: string;
-  title: string | null;
-  abstractText: string | null;
-  authors: string[];
-  publicationYear: number | null;
-  doi: string | null;
-  journal: string | null;
-  volume: string | null;
-  issue: string | null;
-  startPage: string | null;
-  endPage: string | null;
-  keywords: string[];
-  url: string | null;
-  language: string | null;
-  publisher: string | null;
   matchStatus: MatchStatus;
   matchedArticleId: string | null;
   citationCount: number;

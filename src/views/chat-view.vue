@@ -2466,70 +2466,21 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
 }
 
 /* Wiki link + article reference styling inside assistant bubbles.
-   Mirrors wiki-page-viewer.vue so clicks feel consistent. */
-.markdown-content :deep(.wikilink) {
+   Mirrors wiki-page-viewer.vue so clicks feel consistent. The synthesis chip
+   is excluded: its shared rules live in styles/markdown.css and must not
+   have to out-specify these scoped (0,3,0) base rules. */
+.markdown-content :deep(.wikilink:not(.wikilink--synthesis)) {
   color: rgb(79 70 229);
   text-decoration: underline;
   cursor: pointer;
   text-decoration-style: dotted;
 }
-.markdown-content :deep(.wikilink:hover) {
+.markdown-content :deep(.wikilink:not(.wikilink--synthesis):hover) {
   text-decoration-style: solid;
 }
 
-/* Synthesis-styled wikilink chip (from [^art-uuid]: definition lines). */
-.markdown-content :deep(.wikilink--synthesis) {
-  display: inline-block;
-  background: rgb(168 85 247 / 0.12); /* purple-500 @ 12% */
-  color: rgb(126 34 206); /* purple-800 */
-  border: 1px solid rgb(168 85 247 / 0.3);
-  padding: 0.0625rem 0.375rem;
-  border-radius: 0.25rem;
-  font-size: 0.8em;
-  font-weight: 500;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.markdown-content :deep(.wikilink--synthesis:hover) {
-  background: rgb(168 85 247 / 0.2);
-}
-.markdown-content :deep(.art-ref) {
-  display: inline;
-  color: rgb(21 128 61);
-  background: rgb(240 253 244);
-  border: 1px solid rgb(220 252 231);
-  padding: 0 0.3rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  cursor: pointer;
-  text-decoration: none;
-  font-weight: 500;
-}
-.markdown-content :deep(.art-ref:hover) {
-  background: rgb(220 252 231);
-}
-.markdown-content :deep(.art-ref--missing) {
-  color: rgb(148 163 184);
-  background: rgb(241 245 249);
-  border-color: rgb(226 232 240);
-}
-
-/* T2.3 Phase 3: muted section-provenance badge rendered after a wikilink
- * when the citation carries a `(§Section)` suffix (e.g. `[[slug]] (§Methods)`).
- * Mirrors the wiki-page-viewer badge styling so chat + wiki stay consistent. */
-.markdown-content :deep(.section-badge) {
-  display: inline-block;
-  margin-left: 0.25rem;
-  padding: 0.0625rem 0.3125rem;
-  font-size: 0.7em;
-  font-weight: 500;
-  color: rgb(100 116 139);
-  background: rgb(241 245 249);
-  border: 1px solid rgb(226 232 240);
-  border-radius: 0.25rem;
-  vertical-align: baseline;
-}
+/* Synthesis wikilink chip + article-ref + section-badge styles are shared
+ * with wiki-page-viewer in `src/styles/markdown.css` (global). */
 
 /* Tooltip animation */
 .tooltip-fade-enter-active,

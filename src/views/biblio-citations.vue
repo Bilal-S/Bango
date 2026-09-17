@@ -7,6 +7,8 @@ import CitationPaperDetailPanel from '../components/citation-paper-detail-panel.
 import ArticleDetailSlideOver from '../components/article-detail-slide-over.vue';
 import { useCitationNetwork } from '../composables/use-citation-network';
 import { useNetworkView } from '../composables/use-network-view';
+import { useArticleDetailOverlay } from '../composables/use-article-detail-overlay';
+import '../styles/biblio-chrome.css';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
 import { useMainPathWorker } from '../composables/use-main-path-worker';
 import { debounce } from '../utils/debounce';
@@ -56,27 +58,16 @@ const {
 
 const { applyCitationGraphFilters } = useSigmaRenderer();
 
-/**
- * Article detail panel (opened via "open linked record" from citation paper
- * detail). Shared `ArticleDetailSlideOver` owns the useArticleSearch wiring +
- * panel lifecycle; this view keeps only the overlay guards.
- */
-const articleDetailRef = ref<InstanceType<typeof ArticleDetailSlideOver> | null>(null);
-const showArticleDetail = ref(false);
-const isArticleDetailFullScreen = ref(false);
-
-function onArticleDetailOpened(): void {
-  showArticleDetail.value = true;
-}
-
-function onArticleDetailClosed(): void {
-  showArticleDetail.value = false;
-  isArticleDetailFullScreen.value = false;
-}
-
-function onArticleDetailToggleFullScreen(): void {
-  isArticleDetailFullScreen.value = !isArticleDetailFullScreen.value;
-}
+/* Article detail panel (opened via "open linked record" from the citation
+ * paper detail): shared slide-over component + shared overlay guards. */
+const {
+  articleDetailRef,
+  showArticleDetail,
+  isArticleDetailFullScreen,
+  onArticleDetailOpened,
+  onArticleDetailClosed,
+  onArticleDetailToggleFullScreen,
+} = useArticleDetailOverlay();
 
 const selectedPaper = ref<CitationNode | null>(null);
 
@@ -304,7 +295,7 @@ async function onResetAnalysis() {
 </script>
 
 <template>
-  <div class="citation-layout">
+  <div class="network-view-layout">
     <!-- Sidebar Wrapper -->
     <div
       class="sidebar-wrapper relative transition-all duration-300 shrink-0"
@@ -446,87 +437,3 @@ async function onResetAnalysis() {
     />
   </div>
 </template>
-
-<style scoped>
-.citation-layout {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  position: relative;
-}
-
-.sidebar-panel {
-  z-index: 20;
-}
-
-/* Drawer handle - small pill tab positioned at sidebar edge */
-.drawer-handle {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 30;
-  width: 14px;
-  height: 72px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-surface-container-low);
-  border: 1px solid var(--color-outline-variant);
-  border-left: none;
-  border-radius: 0 8px 8px 0;
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
-  cursor: pointer;
-  transition:
-    left 0.3s,
-    background-color 0.15s,
-    border-color 0.15s,
-    width 0.15s;
-}
-
-.drawer-handle:hover {
-  background: var(--color-surface-container);
-  border-color: var(--color-primary);
-  width: 16px;
-}
-
-/* Grip dots inside the handle */
-.drawer-handle-grip {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  align-items: center;
-}
-
-.drawer-handle-grip::before,
-.drawer-handle-grip::after,
-.drawer-handle-grip {
-  content: '';
-  display: block;
-  width: 4px;
-  height: 2px;
-  border-radius: 1px;
-  background: #94a3b8;
-  transition: background-color 0.15s;
-}
-
-.drawer-handle:hover .drawer-handle-grip::before,
-.drawer-handle:hover .drawer-handle-grip::after,
-.drawer-handle:hover .drawer-handle-grip {
-  background: var(--color-primary);
-}
-
-/* Detail panel slide transition */
-.detail-slide-enter-active,
-.detail-slide-leave-active {
-  transition:
-    transform 0.25s ease,
-    opacity 0.25s ease;
-}
-
-.detail-slide-enter-from,
-.detail-slide-leave-to {
-  transform: translateX(100%);
-  opacity: 0;
-}
-</style>

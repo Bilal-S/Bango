@@ -11,6 +11,8 @@ import { useAuthorDetail } from '@/composables/use-author-detail';
 import { resolveCollaboratorAuthor, buildBiblioArticleQuery } from '@/utils/biblio-links';
 import { useToast } from '@/composables/use-toast';
 import { tauriCommand } from '@/composables/use-tauri-command';
+import { saveChartPng, saveChartSvg } from '../utils/network-export';
+import '../styles/biblio-chrome.css';
 
 const router = useRouter();
 const toast = useToast();
@@ -367,18 +369,11 @@ function resetFilters(): void {
 // ── Export (PNG / SVG) ───────────────────────────────────────────
 async function handleExportPng(): Promise<void> {
   try {
-    const chart = scatterRef.value;
+    const chart = scatterRef.value as unknown as {
+      dataURI: () => Promise<{ imgURI: string }>;
+    } | null;
     if (!chart) return;
-    const result = await (
-      chart as unknown as { dataURI: () => Promise<{ imgURI: string }> }
-    ).dataURI();
-    const filePath = await save({
-      defaultPath: 'author-scatter.png',
-      filters: [{ name: 'PNG Image', extensions: ['png'] }],
-    });
-    if (!filePath) return;
-    const base64 = result.imgURI.split(',')[1] ?? '';
-    await tauriCommand('write_base64_to_file', { path: filePath, data: base64 });
+    await saveChartPng(chart, 'author-scatter.png');
   } catch (e) {
     console.error('PNG export failed', e);
   }
@@ -386,18 +381,7 @@ async function handleExportPng(): Promise<void> {
 
 async function handleExportSvg(): Promise<void> {
   try {
-    const chartEl = document.querySelector('.scatter-chart svg');
-    if (!chartEl) return;
-    const clone = chartEl.cloneNode(true) as SVGElement;
-    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-    const svgString = new XMLSerializer().serializeToString(clone);
-    const filePath = await save({
-      defaultPath: 'author-scatter.svg',
-      filters: [{ name: 'SVG', extensions: ['svg'] }],
-    });
-    if (!filePath) return;
-    await tauriCommand('write_text_to_file', { path: filePath, content: svgString });
+    await saveChartSvg('.scatter-chart svg', 'author-scatter.svg');
   } catch (e) {
     console.error('SVG export failed', e);
   }
@@ -1093,50 +1077,6 @@ function onPanelKeydown(event: KeyboardEvent): void {
   background: var(--color-surface-container-high);
 }
 
-.sidebar__action-btn .material-symbols-outlined {
-  font-size: 1rem;
-}
-
-.sidebar__action-caret {
-  margin-left: auto;
-}
-
-.sidebar__export-menu {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: calc(100% + 0.25rem);
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  background: var(--color-surface-container-lowest);
-  border: 1px solid var(--color-outline-variant);
-  border-radius: 0.5rem;
-  box-shadow: 0 4px 12px rgb(15 23 42 / 0.12);
-  overflow: hidden;
-  z-index: 40;
-}
-
-.sidebar__export-menu li {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.75rem;
-  color: var(--color-on-surface-variant);
-  cursor: pointer;
-  transition: background-color 0.15s;
-}
-
-.sidebar__export-menu li:hover {
-  background: var(--color-surface-container);
-}
-
-.sidebar__export-menu li .material-symbols-outlined {
-  font-size: 1rem;
-  color: var(--color-outline);
-}
-
 /* Dual-handle year range */
 .dual-range-block {
   display: flex;
@@ -1219,56 +1159,6 @@ function onPanelKeydown(event: KeyboardEvent): void {
   justify-content: space-between;
   font-size: 0.625rem;
   color: var(--color-outline);
-}
-
-.drawer-handle {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 30;
-  width: 14px;
-  height: 72px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-surface-container-low);
-  border: 1px solid var(--color-outline-variant);
-  border-left: none;
-  border-radius: 0 8px 8px 0;
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
-  cursor: pointer;
-  transition:
-    left 0.3s,
-    background-color 0.15s,
-    border-color 0.15s,
-    width 0.15s;
-}
-.drawer-handle:hover {
-  background: var(--color-surface-container);
-  border-color: var(--color-primary);
-  width: 16px;
-}
-.drawer-handle-grip {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  align-items: center;
-}
-.drawer-handle-grip::before,
-.drawer-handle-grip::after,
-.drawer-handle-grip {
-  content: '';
-  display: block;
-  width: 4px;
-  height: 2px;
-  border-radius: 1px;
-  background: #94a3b8;
-  transition: background-color 0.15s;
-}
-.drawer-handle:hover .drawer-handle-grip::before,
-.drawer-handle:hover .drawer-handle-grip::after,
-.drawer-handle:hover .drawer-handle-grip {
-  background: var(--color-primary);
 }
 
 /* ── Main canvas ─────────────────────────────────────────────── */
@@ -1759,18 +1649,6 @@ function onPanelKeydown(event: KeyboardEvent): void {
 }
 
 /* Slide transition */
-.detail-slide-enter-active,
-.detail-slide-leave-active {
-  transition:
-    transform 0.25s ease,
-    opacity 0.25s ease;
-}
-.detail-slide-enter-from,
-.detail-slide-leave-to {
-  transform: translateX(100%);
-  opacity: 0;
-}
-
 /* ── Responsive: Detail panel as overlay on narrow screens ──── */
 @media (max-width: 768px) {
   .author-panel {

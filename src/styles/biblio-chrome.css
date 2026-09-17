@@ -1,0 +1,130 @@
+/* Shared bibliometrics view chrome (global by design; every class below is
+   used only by the biblio views): layout wrapper, sidebar z-index, the sidebar
+   drawer handle, and the detail-panel slide transition. */
+
+.network-view-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.sidebar-panel {
+  z-index: 20;
+}
+
+/* Drawer handle - small pill tab positioned at sidebar edge */
+.drawer-handle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 30;
+  width: 14px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface-container-low);
+  border: 1px solid var(--color-outline-variant);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
+  cursor: pointer;
+  transition:
+    left 0.3s,
+    background-color 0.15s,
+    border-color 0.15s,
+    width 0.15s;
+}
+
+.drawer-handle:hover {
+  background: var(--color-surface-container);
+  border-color: var(--color-primary);
+  width: 16px;
+}
+
+/* Grip dots inside the handle */
+.drawer-handle-grip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+}
+
+.drawer-handle-grip::before,
+.drawer-handle-grip::after,
+.drawer-handle-grip {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: #94a3b8;
+  transition: background-color 0.15s;
+}
+
+.drawer-handle:hover .drawer-handle-grip::before,
+.drawer-handle:hover .drawer-handle-grip::after,
+.drawer-handle:hover .drawer-handle-grip {
+  background: var(--color-primary);
+}
+
+/* Detail panel slide transition */
+.detail-slide-enter-active,
+.detail-slide-leave-active {
+  transition:
+    transform 0.25s ease,
+    opacity 0.25s ease;
+}
+
+.detail-slide-enter-from,
+.detail-slide-leave-to {
+  transform: translateX(100%);
+  opacity: 0;
+}
+
+/* Sidebar export dropdown (author scatter + publication timeline sidebars) */
+.sidebar__action-btn .material-symbols-outlined {
+  font-size: 1rem;
+}
+
+.sidebar__action-caret {
+  margin-left: auto;
+}
+
+.sidebar__export-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 0.25rem);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--color-surface-container-lowest);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgb(15 23 42 / 0.12);
+  overflow: hidden;
+  z-index: 40;
+}
+
+.sidebar__export-menu li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.sidebar__export-menu li:hover {
+  background: var(--color-surface-container);
+}
+
+.sidebar__export-menu li .material-symbols-outlined {
+  font-size: 1rem;
+  color: var(--color-outline);
+}

@@ -6,6 +6,7 @@ import { tauriCommand } from '@/composables/use-tauri-command';
 import { useCriteriaStore } from '@/stores/criteria';
 import { useLlmConfigured } from '@/composables/use-llm-configured';
 import { useToast } from '@/composables/use-toast';
+import '@/styles/ai-critique.css';
 import { formatLlmError } from '@/utils/llm-error';
 import type { SearchStrategyResult } from '@/types/search-strategy';
 import SearchStrategyCard from '@/components/search-strategy-card.vue';
@@ -1715,48 +1716,8 @@ async function handleOpenAlexSmartSearch(): Promise<void> {
   font-size: 20px;
 }
 
-.ai-critique-card__title-group {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: #6b21a8;
-}
-
-.ai-critique-card__title-group .material-symbols-outlined {
-  font-size: 20px;
-}
-
-.ai-critique-card__title {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.ai-critique-card__dismiss {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: #94a3b8;
-  padding: 0.25rem;
-  border-radius: 0.25rem;
-  transition:
-    color 0.15s,
-    background-color 0.15s;
-}
-
-.ai-critique-card__dismiss:hover {
-  color: #ba1a1a;
-  background-color: #fef2f2;
-}
-
-.ai-critique-card__dismiss .material-symbols-outlined {
-  font-size: 18px;
-}
-
-.ai-critique-card__body {
-  font-size: 14px;
-  line-height: 22px;
-  color: #1b1b24;
-}
+/* The shared `.ai-critique-card__*` chrome lives in
+ * `src/styles/ai-critique.css` (global). */
 
 .ai-critique-card__body :deep(p) {
   margin-bottom: 0.75rem;

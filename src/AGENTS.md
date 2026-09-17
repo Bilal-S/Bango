@@ -139,7 +139,13 @@ directories are indexed inline.
 - **`stores/`** - Pinia stores: `chat.ts` (incl. draft persistence),
   `openalex.ts`, `llm-config.ts` (the gate's single source of truth). See
   `stores/AGENTS.md`.
-- **`utils/`** - pure utilities. Notable: `network-export.ts`, `formatters.ts`,
+- **`utils/`** - pure utilities. Notable: `network-export.ts` (sigma PNG/GEXF
+  + ApexCharts `saveChartPng`/`saveChartSvg` shared by the author/timeline
+  views), `network-visual-state.ts` (shared focus/cluster dimming pass used
+  by the co-author/keyword/cocitation graph components),
+  `graph-layout.ts` (deterministic sunflower-spiral layout seeding +
+  post-ForceAtlas2 minimum-separation guard; used by the wiki graph panel),
+  `formatters.ts`,
   `color.ts`, `debounce.ts`, `next-paint.ts`, `reference-flatten.ts`,
   `citation-analysis.ts`, `graph-filters.ts`, `llm-error.ts`,
   `google-trends.ts`, `wiki-markdown.ts`, `wiki-site-export.ts`,
@@ -156,5 +162,8 @@ directories are indexed inline.
 - **`router/`** - route table (see Local Contracts).
 - **`styles/`** - global CSS (`forms.css`, `base.css`, `help-shared.css`;
   see Local Contracts). (Settings-card chrome lives in
-  `components/settings/settings-card-shared.css`, see `components/AGENTS.md`.)
+  `components/settings/settings-card-shared.css`, see `components/AGENTS.md`;
+  `biblio-chrome.css` holds the shared biblio view chrome - layout wrapper,
+  sidebar drawer handle, export dropdown, slide transitions; `ai-critique.css`
+  holds the shared AI critique card chrome.)
 - **`workers/`** - web workers.

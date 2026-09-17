@@ -1,0 +1,53 @@
+/* Shared AI critique card chrome (search-strategy-card + criteria-editor).
+   Global on purpose: both components render the same card markup. */
+.ai-critique-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.ai-critique-card__title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #6b21a8;
+}
+
+.ai-critique-card__title-group .material-symbols-outlined {
+  font-size: 20px;
+}
+
+.ai-critique-card__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ai-critique-card__dismiss {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #94a3b8;
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  display: flex;
+  align-items: center;
+  transition:
+    color 0.15s,
+    background-color 0.15s;
+}
+
+.ai-critique-card__dismiss:hover {
+  color: #ba1a1a;
+  background-color: #fef2f2;
+}
+
+.ai-critique-card__dismiss .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.ai-critique-card__body {
+  font-size: 14px;
+  line-height: 22px;
+  color: #1b1b24;
+}

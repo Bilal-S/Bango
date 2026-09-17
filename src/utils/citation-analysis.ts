@@ -4,15 +4,21 @@
 
 import type Graph from 'graphology';
 
-/** Compute ancestry of a node (transitive out-edges BFS). Excludes `nodeId`. */
-export function computeAncestry(graph: Graph, nodeId: string): Set<string> {
+/**
+ * Transitive closure over `neighborsOf` (BFS). Excludes the start node from
+ * the result; the start node stays in `visited` so cycles back to it break.
+ */
+function transitiveNeighbors(
+  graph: Graph,
+  nodeId: string,
+  neighborsOf: (node: string) => Iterable<string>
+): Set<string> {
   if (!graph.hasNode(nodeId)) return new Set();
 
-  // Seed visited with the start node so cycles back to it are broken.
   const visited = new Set<string>([nodeId]);
   const queue: string[] = [];
 
-  for (const n of graph.outNeighbors(nodeId)) {
+  for (const n of neighborsOf(nodeId)) {
     if (!visited.has(n)) {
       visited.add(n);
       queue.push(n);
@@ -21,7 +27,7 @@ export function computeAncestry(graph: Graph, nodeId: string): Set<string> {
 
   while (queue.length > 0) {
     const current = queue.shift()!;
-    for (const neighbor of graph.outNeighbors(current)) {
+    for (const neighbor of neighborsOf(current)) {
       if (!visited.has(neighbor)) {
         visited.add(neighbor);
         queue.push(neighbor);
@@ -33,33 +39,14 @@ export function computeAncestry(graph: Graph, nodeId: string): Set<string> {
   return visited;
 }
 
+/** Compute ancestry of a node (transitive out-edges BFS). Excludes `nodeId`. */
+export function computeAncestry(graph: Graph, nodeId: string): Set<string> {
+  return transitiveNeighbors(graph, nodeId, (n) => graph.outNeighbors(n));
+}
+
 /** Compute progeny of a node (transitive in-edges BFS). Excludes `nodeId`. */
 export function computeProgeny(graph: Graph, nodeId: string): Set<string> {
-  if (!graph.hasNode(nodeId)) return new Set();
-
-  // Seed visited with the start node so cycles back to it are broken.
-  const visited = new Set<string>([nodeId]);
-  const queue: string[] = [];
-
-  for (const n of graph.inNeighbors(nodeId)) {
-    if (!visited.has(n)) {
-      visited.add(n);
-      queue.push(n);
-    }
-  }
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    for (const neighbor of graph.inNeighbors(current)) {
-      if (!visited.has(neighbor)) {
-        visited.add(neighbor);
-        queue.push(neighbor);
-      }
-    }
-  }
-
-  visited.delete(nodeId); // exclude start node from result
-  return visited;
+  return transitiveNeighbors(graph, nodeId, (n) => graph.inNeighbors(n));
 }
 
 /** Return nodes whose `year` is within [min, max] (inclusive), or null/undefined

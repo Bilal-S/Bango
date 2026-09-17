@@ -51,6 +51,22 @@ export interface CoAuthorGraphFilters {
  * - `minPapers`/`minLinkStrength`: threshold on node/edge `weight`.
  * - `maxAuthors`: drop edges exceeding maxAuthorCount (mega-author papers).
  * - `search`: case-insensitive substring match on node `label`. */
+/**
+ * Shared node predicate: `weight` floor + case-insensitive `label` substring
+ * match (empty search matches everything).
+ */
+function weightAndLabelPredicate(
+  g: Graph,
+  minWeight: number,
+  searchLower: string
+): (node: string) => boolean {
+  return (node) => {
+    const weight = g.getNodeAttribute(node, 'weight') as number;
+    const label = (g.getNodeAttribute(node, 'label') as string) ?? '';
+    return weight >= minWeight && (!searchLower || label.toLowerCase().includes(searchLower));
+  };
+}
+
 export function applyGraphFilters(
   g: Graph,
   filters: CoAuthorGraphFilters
@@ -60,11 +76,7 @@ export function applyGraphFilters(
 
   return applyVisibility(
     g,
-    (node) => {
-      const weight = g.getNodeAttribute(node, 'weight') as number;
-      const label = (g.getNodeAttribute(node, 'label') as string) ?? '';
-      return weight >= minPapers && (!searchLower || label.toLowerCase().includes(searchLower));
-    },
+    weightAndLabelPredicate(g, minPapers, searchLower),
     /* Edge passes strength + maxAuthors; visibility additionally requires
      * both endpoints visible. */
     (edge) => {
@@ -195,13 +207,7 @@ export function applyKeywordGraphFilters(
 
   return applyVisibility(
     g,
-    (node) => {
-      const weight = g.getNodeAttribute(node, 'weight') as number;
-      const label = (g.getNodeAttribute(node, 'label') as string) ?? '';
-      return (
-        weight >= minOccurrences && (!searchLower || label.toLowerCase().includes(searchLower))
-      );
-    },
+    weightAndLabelPredicate(g, minOccurrences, searchLower),
     (edge) => (g.getEdgeAttribute(edge, 'weight') as number) >= minCooccurrence
   );
 }
