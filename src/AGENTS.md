@@ -154,6 +154,7 @@ directories are indexed inline.
   `zotero.ts` (local API payload types mirrored from the Rust serde
   structs), `index.ts`).
 - **`router/`** - route table (see Local Contracts).
-- **`styles/`** - global CSS (`forms.css`, `base.css`, `help-shared.css`,
-  `settings-card-shared.css`; see Local Contracts).
+- **`styles/`** - global CSS (`forms.css`, `base.css`, `help-shared.css`;
+  see Local Contracts). (Settings-card chrome lives in
+  `components/settings/settings-card-shared.css`, see `components/AGENTS.md`.)
 - **`workers/`** - web workers.

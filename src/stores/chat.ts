@@ -322,7 +322,6 @@ export const useChatStore = defineStore('chat', () => {
     selectedArticleIds,
     messages,
     loading,
-    error,
     source,
     inputDraft,
     citationDraft,

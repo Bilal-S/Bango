@@ -10,10 +10,12 @@
 //! drive the async phase functions via `#[tokio::test]`.
 
 use std::io::Write;
+use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 
 use bango_lib::batch_import::{
-    citations_phase, embeddings_phase, full_text_phase, translations_phase,
+    apply_progress_snapshot, citations_phase, embeddings_phase, full_text_phase,
+    translations_phase, BatchImportPhaseResult, BatchImportProgress, BatchImportState,
 };
 use bango_lib::db::app_settings_repo::{set_setting, STORAGE_ROOT_KEY};
 use bango_lib::db::article_repo;
@@ -22,6 +24,7 @@ use bango_lib::db::audit_repo;
 use bango_lib::db::migration::run_migrations;
 use bango_lib::db::reference_repo;
 use bango_lib::embedding::runner::EmbeddingRunReport;
+use bango_lib::error::AppError;
 use bango_lib::models::article::NewArticle;
 use bango_lib::scraping::citation_chaser::clean_doi_filename;
 use rusqlite::Connection;
@@ -94,6 +97,97 @@ fn never_cancel() -> impl Fn() -> bool {
 /// A no-op progress callback for tests.
 fn noop_progress() -> impl FnMut(usize, usize, &str) {
     |_, _, _| {}
+}
+
+// ── Cancel token + progress snapshot (poison-safe state contract) ───────────
+
+/// The cancel token is a lock-free `AtomicBool`: no mutex to poison, and the
+/// phase-boundary check can never silently skip on contention.
+#[test]
+fn cancel_token_store_and_load_round_trip() {
+    let state = BatchImportState::default();
+    let handle = state.cancel_handle();
+    assert!(!handle.load(Ordering::Relaxed), "fresh token must not be cancelled");
+
+    handle.store(true, Ordering::Relaxed);
+    // A second handle shares the same token (Arc clone): the cancel is observed.
+    assert!(state.cancel_handle().load(Ordering::Relaxed));
+}
+
+/// Snapshot merge semantics: scalar fields overwrite; per-phase `Some` fields
+/// overwrite, `None` fields keep the stored value.
+#[test]
+fn apply_progress_snapshot_merges_some_fields_and_keeps_none() {
+    let progress = Mutex::new(BatchImportProgress::default());
+    let snapshot = BatchImportProgress {
+        phase: 2,
+        phase_name: "Citations".to_string(),
+        completed: 3,
+        total: 5,
+        overall_percent: 40,
+        message: "working".to_string(),
+        is_running: true,
+        is_cancelled: false,
+        full_text: Some(BatchImportPhaseResult {
+            total: 1,
+            processed: 1,
+            succeeded: 1,
+            failed: 0,
+            errors: vec![],
+        }),
+        citations: None,
+        translations: None,
+        summaries: None,
+    };
+    apply_progress_snapshot(&progress, &snapshot).expect("healthy snapshot applies");
+
+    let guard = progress.lock().unwrap();
+    assert_eq!(guard.phase, 2);
+    assert_eq!(guard.completed, 3);
+    assert!(guard.full_text.is_some(), "Some fields overwrite");
+    assert!(guard.citations.is_none(), "None fields keep the stored value");
+}
+
+/// A poisoned progress mutex must map to `LockPoisoned`, never panic: progress
+/// snapshots are advisory UI state, so the pipeline tolerates the failure.
+#[test]
+fn apply_progress_snapshot_maps_poison_to_lock_poisoned_without_panicking() {
+    let poisoned = Mutex::new(BatchImportProgress::default());
+    // Poison by panicking while holding the lock.
+    let _ = std::panic::catch_unwind(|| {
+        let _guard = poisoned.lock().unwrap();
+        panic!("deliberate poison");
+    });
+    let err = apply_progress_snapshot(&poisoned, &BatchImportProgress::default())
+        .expect_err("poisoned mutex");
+    assert!(matches!(err, AppError::LockPoisoned(_)), "got: {err:?}");
+}
+
+/// Characterization: with the cancel closure reporting true, Phase 1 discovers
+/// the file but attaches nothing (the per-item cancel check precedes item 1).
+#[tokio::test]
+async fn phase1_attaches_nothing_when_cancelled_before_first_item() {
+    let tmp = TempDir::new().unwrap();
+    let conn = test_db();
+    configure_storage_root(&conn, tmp.path());
+
+    let doi_a = "10.1001/cancel-a";
+    let _id = insert_article_with_doi(&conn, doi_a, "Article A");
+    write_fulltext_txt(tmp.path(), doi_a, "Full text of Article A.");
+
+    let conn_mutex = Mutex::new(conn);
+    let (result, newly_attached) =
+        full_text_phase::run_full_text_phase(&conn_mutex, &|| true, &mut noop_progress())
+            .await
+            .expect("phase 1 with cancel");
+
+    assert_eq!(result.total, 1, "discovery still counts the file");
+    assert_eq!(result.succeeded, 0, "cancelled before the first attach");
+    assert!(newly_attached.is_empty());
+
+    let conn = conn_mutex.into_inner().unwrap();
+    let articles = get_articles_with_doi_info(&conn).unwrap();
+    assert!(!articles[0].has_full_text, "article must stay unattached");
 }
 
 // ── Phase 1: Full Text ──────────────────────────────────────────────────────

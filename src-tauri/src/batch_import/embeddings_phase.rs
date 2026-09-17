@@ -8,16 +8,15 @@
 //! LLM-configured + embeddings-not-disabled gate with system audit record,
 //! mirroring Phase 4's `llm_configured_with_audit`.
 //!
-//! # v2 cancel-token bridge
+//! # Cancel token
 //!
-//! Batch-import cancel flag is `Arc<Mutex<bool>>` (sync for per-item
-//! callbacks). The v2 runner takes `Option<Arc<AtomicBool>>`. We snapshot
-//! `cancel_handle` into `Arc<AtomicBool>` ONCE before calling the runner
-//! because the pre-flight already polled it and `JoinSet::abort_all` handles
-//! mid-run cancel cleanly (drops in-flight vectors with no DB writes).
+//! The batch-import cancel token is a lock-free `Arc<AtomicBool>` shared
+//! directly with the v2 runner (which takes `Option<Arc<AtomicBool>>`).
+//! Mid-run cancel is handled inside the runner via `JoinSet::abort_all`
+//! (drops in-flight vectors with no DB writes).
 
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use tauri::{Emitter, Manager, State};
 
@@ -39,11 +38,11 @@ use super::BatchImportPhaseResult;
 /// `embedding:done`.
 ///
 /// Cancel polled once pre-flight; mid-run handled inside the runner via
-/// `JoinSet::abort_all` on the snapshotted `Arc<AtomicBool>`.
+/// `JoinSet::abort_all` on the shared `Arc<AtomicBool>`.
 pub async fn run_embeddings_phase(
     db_state: &State<'_, DbState>,
     app_handle: &tauri::AppHandle,
-    cancel_handle: Arc<Mutex<bool>>,
+    cancel_handle: Arc<AtomicBool>,
 ) -> BatchImportPhaseResult {
     // Pre-flight: LLM configured?
     if !llm_configured_with_audit(db_state) {
@@ -83,7 +82,7 @@ pub async fn run_embeddings_phase(
     }
 
     // Check cancellation before starting.
-    if *cancel_handle.lock().expect("batch import mutex") {
+    if cancel_handle.load(Ordering::Relaxed) {
         return BatchImportPhaseResult {
             total: 0,
             processed: 0,
@@ -93,13 +92,11 @@ pub async fn run_embeddings_phase(
         };
     }
 
-    /* v2 cancel-token bridge: snapshot `cancel_handle` into `Arc<AtomicBool>`
-    ONCE. The runner's JoinSet + abort_all handles mid-run cancel; Cancel
-    takes effect at next `join_next()` completion (~100ms granularity =
-    one LLM call + DB write per article). The previous live-mirror task
-    (polling every 100ms) is obsolete. */
-    let cancel_atomic =
-        Arc::new(AtomicBool::new(*cancel_handle.lock().expect("batch import mutex")));
+    /* v2 cancel token: passed straight through as the shared `Arc<AtomicBool>`.
+    The runner's JoinSet + abort_all handles mid-run cancel; Cancel takes
+    effect at the next `join_next()` completion (~100ms granularity = one LLM
+    call + DB write per article). */
+    let cancel_atomic = Arc::clone(&cancel_handle);
 
     let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>().inner().clone();
     // Wrap the orchestrator into the v2 HttpEmbeddingBatchSender.

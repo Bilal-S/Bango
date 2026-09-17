@@ -417,4 +417,31 @@ describe('useChatStore', () => {
     await store.cancelCitationSearch();
     expect(store.cancelling).toBe(true);
   });
+
+  // ── send-failure path + public API surface ────────────────────────────────
+
+  it('send failure pushes an Error assistant bubble (failure surfaces in chat)', async () => {
+    const store = useChatStore();
+    store.addSelectedArticle('art-1');
+    vi.mocked(tauriCommand).mockRejectedValueOnce(new Error('LLM unreachable'));
+
+    await store.sendMessage('What is the main finding?');
+
+    const last = store.messages[store.messages.length - 1]!;
+    expect(last.role).toBe('assistant');
+    expect(last.content).toBe('Error: LLM unreachable');
+    expect(store.loading).toBe(false);
+  });
+
+  it('error ref is internal - not exposed on the public store API', async () => {
+    const store = useChatStore();
+    vi.mocked(tauriCommand).mockRejectedValueOnce(new Error('boom'));
+
+    await store.sendMessage('will fail');
+
+    /* The failure contract is the Error assistant bubble above; the raw error
+     * ref is store-internal and must not leak into the public API. */
+    const publicApi = store as unknown as Record<string, unknown>;
+    expect('error' in publicApi).toBe(false);
+  });
 });

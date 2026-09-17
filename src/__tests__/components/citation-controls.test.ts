@@ -7,7 +7,6 @@ type Props = InstanceType<typeof CitationControls>['$props'];
 function baseProps(): Props {
   return {
     totalNodes: 20,
-    totalEdges: 30,
     visibleNodes: 18,
     visibleEdges: 25,
     clusterCount: 2,
@@ -57,5 +56,13 @@ describe('citation-controls.vue', () => {
     expect(events).toBeTruthy();
     const last = events![events!.length - 1]![0] as { search: string };
     expect(last.search).toBe('deep learning');
+  });
+
+  it('totalEdges is not part of the component API (dead prop removed)', () => {
+    /* The prop was declared but never referenced; siblings render their own
+     * edge counts. Passing the value now must land as an inert attribute, not
+     * a declared prop. */
+    const wrapper = mount(CitationControls, { props: baseProps() });
+    expect(wrapper.vm.$props).not.toHaveProperty('totalEdges');
   });
 });

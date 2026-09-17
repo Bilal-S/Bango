@@ -318,7 +318,6 @@ async function onResetAnalysis() {
         <CitationControls
           class="my-auto"
           :total-nodes="stats.totalNodes"
-          :total-edges="stats.totalEdges"
           :visible-nodes="stats.visibleNodes"
           :visible-edges="stats.visibleEdges"
           :cluster-count="stats.clusterCount"

@@ -76,11 +76,12 @@ pub struct Section {
 
 // ─── Detection regexes (compiled once) ──────────────────────────────────────
 /* `Regex::new` on a static, hand-validated pattern cannot fail in practice.
-Clippy forbids `.expect()` in library code, so we use `.unwrap_or_else` with
-a fallback that compiles a trivial always-matching-safe pattern. */
+An invalid pattern falls back to the trivial empty-match `^$` regex; the
+fallback literal is itself statically valid, so its single `.expect()` below
+is unreachable and carries the narrow function-level allow instead of a
+file-wide exemption. */
 
-/** Compile a static regex pattern. Uses a trivial fallback to satisfy the
-no-panics rule without `expect`; the actual patterns cannot fail. */
+/** Compile a static regex pattern with a hand-validated `^$` fallback. */
 #[allow(clippy::expect_used)]
 pub(crate) fn compile_static_regex(pattern: &str) -> Regex {
     Regex::new(pattern).unwrap_or_else(|_| Regex::new(r"^$").expect("fallback regex is valid"))

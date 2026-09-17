@@ -12,7 +12,7 @@ import type {
 } from '@/types/zotero';
 
 /** The local-API preference path repeated by every communication-error state. */
-export const ZOTERO_ENABLE_API_HINT =
+const ZOTERO_ENABLE_API_HINT =
   'Enable the local API in Zotero under Settings -> Advanced -> "Allow other applications on this computer to communicate with Zotero".';
 
 /**

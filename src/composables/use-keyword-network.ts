@@ -125,7 +125,7 @@ export function useKeywordNetwork() {
         };
         w.postMessage(req);
       } else {
-        console.warn('Worker fallback used.');
+        // Worker unavailable: fall back to the synchronous layout-free graph.
         graph.value = buildGraph({
           nodes: response.nodes,
           edges: response.edges,

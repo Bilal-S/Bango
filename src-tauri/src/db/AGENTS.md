@@ -20,7 +20,7 @@ maintenance (VACUUM), and the shared `DbState` connection holder.
 
 ## Local Contracts
 
-### `connection.rs` - `DbState` + `lock_conn`
+### `connection.rs` - `DbState` + lock helpers
 
 Holds `DbState` (`conn: Mutex<Connection>`) and the shared
 `lock_conn(conn_mutex) -> Result<MutexGuard<'_, Connection>, AppError>` helper
@@ -32,6 +32,17 @@ application-state errors and the error-mapping boilerplate is not duplicated.
 The private `lock_conn` in `commands/wiki_cmd` and `lock_db` in
 `translation/engine.rs` were removed in favor of this shared helper. Tested in
 `tests/db/lock_poison_test.rs`.
+
+`lock_state<T>(mutex) -> Result<MutexGuard<'_, T>, AppError>` is the generic
+sibling for managed-state mutexes that do NOT hold a `Connection`
+(batch-import progress, chunk-rebuild progress): same `LockPoisoned` mapping,
+no slow-acquire diagnostic (short in-memory state updates, not SQL work).
+Callers holding `&Arc<Mutex<T>>` pass the field by reference (deref coercion)
+or `&owned`; passing an owned `Arc` by value does not compile. Lock-free
+`Arc<AtomicBool>` tokens (cancel flags) are preferred over `Mutex<bool>` -
+there is no poison path and checks cannot be skipped on contention. Both
+helpers tested in `tests/db/lock_poison_test.rs` +
+`tests/batch_import/batch_import_test.rs`.
 
 `lock_conn` also times the acquire and emits
 `lock_conn: SLOW acquire ({ms}ms)` when > `SLOW_LOCK_THRESHOLD_MS = 100`; this

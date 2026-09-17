@@ -319,7 +319,6 @@ import NetworkExportMenu from './network-export-menu.vue';
 
 const props = defineProps<{
   totalNodes: number;
-  totalEdges: number;
   visibleNodes: number;
   visibleEdges: number;
   clusterCount: number;

@@ -7,7 +7,7 @@ use tauri::{Emitter, Manager};
 use crate::db::app_settings_repo;
 use crate::db::article_repo;
 use crate::db::chunk_repo;
-use crate::db::connection::DbState;
+use crate::db::connection::{lock_state, DbState};
 use crate::db::embedding_repo;
 use crate::embedding::director::EmbeddingScope;
 use crate::embedding::runner::{
@@ -924,7 +924,7 @@ fn update_rebuild_progress(
     progress: &Arc<Mutex<RebuildChunksProgress>>,
     f: impl FnOnce(&mut RebuildChunksProgress),
 ) -> Result<RebuildChunksProgress, AppError> {
-    let mut guard = progress.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))?;
+    let mut guard = lock_state(progress)?;
     f(&mut guard);
     guard.percent = rebuild_percent(guard.completed, guard.total);
     Ok(guard.clone())
@@ -946,7 +946,7 @@ pub fn claim_run_slot(
     progress: &Arc<Mutex<RebuildChunksProgress>>,
     cancel: &Arc<AtomicBool>,
 ) -> Result<bool, AppError> {
-    let mut guard = progress.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))?;
+    let mut guard = lock_state(progress)?;
     if guard.is_running {
         return Ok(false);
     }
@@ -959,7 +959,7 @@ pub fn claim_run_slot(
 
 /// Release a claimed-but-unstarted slot (discovery error path).
 pub fn release_run_slot(progress: &Arc<Mutex<RebuildChunksProgress>>) -> Result<(), AppError> {
-    let mut guard = progress.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))?;
+    let mut guard = lock_state(progress)?;
     guard.is_running = false;
     Ok(())
 }
@@ -973,7 +973,7 @@ pub fn finalize_rebuild_progress(
     progress: &Arc<Mutex<RebuildChunksProgress>>,
     cancel: &Arc<AtomicBool>,
 ) -> Result<RebuildChunksProgress, AppError> {
-    let mut guard = progress.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))?;
+    let mut guard = lock_state(progress)?;
     if cancel.load(Ordering::Relaxed) {
         guard.is_cancelled = true;
     }
@@ -1355,8 +1355,7 @@ pub async fn start_rebuild_chunks(
     // a fresh claim resets the token + snapshot in the SAME critical section
     // (no double-spawn race between overlapping start invokes).
     if !claim_run_slot(&rebuild_state.progress, &rebuild_state.cancel_handle())? {
-        let guard =
-            rebuild_state.progress.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))?;
+        let guard = lock_state(&rebuild_state.progress)?;
         return Ok(guard.clone());
     }
 
@@ -1443,7 +1442,7 @@ pub async fn start_rebuild_chunks(
         }
     });
 
-    let guard = progress.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))?;
+    let guard = lock_state(&progress)?;
     Ok(guard.clone())
 }
 
@@ -1463,7 +1462,7 @@ pub async fn cancel_rebuild_chunks(
 pub async fn get_rebuild_chunks_progress(
     rebuild_state: tauri::State<'_, RebuildChunksState>,
 ) -> Result<RebuildChunksProgress, AppError> {
-    let guard = rebuild_state.progress.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))?;
+    let guard = lock_state(&rebuild_state.progress)?;
     Ok(guard.clone())
 }
 

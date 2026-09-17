@@ -52,7 +52,6 @@ const emit = defineEmits<{
   toggleFullScreen: [];
   attachFullText: [id: string];
   deleteFullText: [id: string];
-  readFullText: [id: string];
   refreshArticle: [id: string];
   articlePromoted: [articleId: string];
   readerOpened: [];

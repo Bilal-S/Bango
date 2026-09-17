@@ -63,4 +63,35 @@ describe('debounce', () => {
     expect(fn1).toHaveBeenCalledTimes(1);
     expect(fn2).toHaveBeenCalledTimes(1);
   });
+
+  it('does not forward this to the wrapped function', () => {
+    /* Contract: module-scope debouncing only. The wrapper never forwards a
+     * dynamic `this` to the wrapped function (no call site relies on it). */
+    const sentinel = { marker: 'sentinel' };
+    const seen: { self: unknown; arg: string | null } = { self: 'unset', arg: null };
+    const fn = function (this: unknown, v: string): void {
+      seen.self = this;
+      seen.arg = v;
+    };
+    const debounced = debounce(fn, 100);
+
+    debounced.call(sentinel, 'x');
+    vi.advanceTimersByTime(100);
+
+    expect(seen.arg).toBe('x');
+    expect(seen.self).not.toBe(sentinel);
+  });
+
+  it('supports async functions with typed arguments', () => {
+    const calls: Array<{ query: string; n: number }> = [];
+    const debounced = debounce(async (query: string, n: number): Promise<void> => {
+      calls.push({ query, n });
+    }, 50);
+
+    debounced('wiki', 3);
+    debounced('wiki-2', 4);
+    vi.advanceTimersByTime(50);
+
+    expect(calls).toEqual([{ query: 'wiki-2', n: 4 }]);
+  });
 });

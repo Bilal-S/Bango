@@ -133,4 +133,16 @@ describe('full-text-reader.vue - fallback banner', () => {
     /* The whole overlay (including the banner) unmounts on close. */
     expect(wrapper.find('.bg-amber-50').exists()).toBe(false);
   });
+
+  it('emits toggleFullScreen (and never requestOpen) on the expand toggle', () => {
+    const wrapper = mountReader();
+
+    const vm = wrapper.vm as unknown as { toggleFullTextExpand: () => void };
+    vm.toggleFullTextExpand();
+
+    /* fullScreen=false + expand-on => the panel-fullscreen sync fires. The
+     * retired `requestOpen` emit never fires (it was declared, never emitted). */
+    expect(wrapper.emitted('toggleFullScreen')).toBeTruthy();
+    expect(wrapper.emitted('requestOpen')).toBeUndefined();
+  });
 });

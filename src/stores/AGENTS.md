@@ -15,7 +15,9 @@ Pinia stores: chat, OpenAlex search state, LLM config.
 
 ### `chat.ts`
 
-Pinia chat store. Holds `selectedArticleIds`, `messages`, `loading`, `error`,
+Pinia chat store. Holds `selectedArticleIds`, `messages`, `loading` (send
+failures surface as an `Error: ...` assistant bubble; the error ref itself is
+store-internal, not part of the public API),
 plus the retrieval-source state `source: 'articles'|'wiki'` (default
 `'articles'`; mutually exclusive) and `wikiReady` (drives the chat-view wiki
 toggle visibility). `sendMessage(text)` branches: `source==='wiki'` calls

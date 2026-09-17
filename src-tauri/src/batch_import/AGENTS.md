@@ -126,8 +126,11 @@ DOI match map.
 ## Work Guidance
 
 - Spawned `tokio::task` so the UI stays responsive and the user can navigate
-  away; cancel token checked between items; emits `batch-import:progress`
-  events.
+  away; cancel token (lock-free `Arc<AtomicBool>`, `Relaxed` ordering - cancel
+  is best-effort by design) checked per item and at every phase boundary;
+  emits `batch-import:progress` events. Progress snapshots route through
+  `db::connection::lock_state` (poison maps to `AppError::LockPoisoned` and
+  the snapshot is skipped + logged - progress is advisory UI state).
 - Frontend `settings-reprocessing.vue`: live progress bar with phase label +
   per-phase completed/total + overall percent + cancel button; per-phase
   summary lines surface skip messages - e.g. "Skipped: LLM not configured" -
@@ -148,10 +151,12 @@ collision + empty skip + secondary `article_id → DOI` index for the O(n)
 per-article lookup) + `citations_phase.rs` (skip-when-has-details,
 find-references, find-citations-independently, generic-ris-fallback,
 generic-bib-fallback). End-to-end integration tests live in
-`tests/batch_import/batch_import_test.rs` (13 tests: Phase 1 attach + skip-already-attached
+`tests/batch_import/batch_import_test.rs` (17 tests: Phase 1 attach + skip-already-attached
 + no-matching-DOI + no-DOI-article; Phase 2 refs + citations + independent +
 skip-already-has-details; full-pipeline idempotency; multiple articles with
-mixed files; Phase 3 pre-flight skip + audit + proceed) +
+mixed files; Phase 3 pre-flight skip + audit + proceed; cancel-token
+store/load round-trip; progress-snapshot merge semantics + poison mapping;
+Phase 1 cancel-before-first-item) +
 `tests/utils/full_text_split_test.rs` (12 tests: isolated coverage of the split
 pipeline `extract_full_text_data` + `commit_full_text_to_db` +
 `attach_full_text_split` - figures-flag true/false, soft-fallback on invalid

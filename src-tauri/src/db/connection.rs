@@ -19,7 +19,7 @@ const SLOW_LOCK_THRESHOLD_MS: u128 = 100;
 /// `DbState.conn` MUST route through this helper.
 ///
 /// Diagnostics: times the acquire; emits `[screening:diag] lock_conn: SLOW
-/// acquire ({elapsed}ms)` above [`SLOW_LOCK_THRESHOLD_MS`] — the primary signal
+/// acquire ({elapsed}ms)` above [`SLOW_LOCK_THRESHOLD_MS`] - the primary signal
 /// for mutex-starvation hangs.
 pub fn lock_conn(conn_mutex: &Mutex<Connection>) -> Result<MutexGuard<'_, Connection>, AppError> {
     let start = Instant::now();
@@ -31,6 +31,15 @@ pub fn lock_conn(conn_mutex: &Mutex<Connection>) -> Result<MutexGuard<'_, Connec
         );
     }
     Ok(guard)
+}
+
+/// Lock any managed-state mutex that does not hold a DB `Connection`
+/// (batch-import progress, chunk-rebuild progress). Maps poisoned-mutex
+/// failures to [`AppError::LockPoisoned`] - the same contract as
+/// [`lock_conn`] without the DB slow-acquire diagnostic (these locks guard
+/// short in-memory state updates, not SQL work).
+pub fn lock_state<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, AppError> {
+    mutex.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))
 }
 
 pub fn create_connection_at(path: &Path) -> Result<Connection, AppError> {

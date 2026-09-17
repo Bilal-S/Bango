@@ -115,6 +115,26 @@ describe('detail-header.vue', () => {
     });
     expect(wrapper.text()).toContain('progress_activity');
   });
+
+  it('emits readFullText when the full-text icon button is clicked', async () => {
+    /* The child header owns the emit; the parent panel handles it inline
+     * (opens the embedded reader) instead of re-emitting at panel level. */
+    const wrapper = mount(DetailHeader, {
+      props: {
+        ...baseProps,
+        article: makeArticle({ hasFullText: true, fullTextFileName: 'paper.pdf' }),
+        hasFiguresOrTables: false,
+        fullTextFileIcon: 'picture_as_pdf',
+      },
+    });
+    const readBtn = wrapper
+      .findAll('button')
+      .find((b) => (b.attributes('title') ?? '').startsWith('Open full text'));
+    expect(readBtn).toBeTruthy();
+
+    await readBtn!.trigger('click');
+    expect(wrapper.emitted('readFullText')).toBeTruthy();
+  });
 });
 
 // ─── Inline title editing (double-click) ─────────────────────────────

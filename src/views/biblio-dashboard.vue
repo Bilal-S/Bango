@@ -180,9 +180,7 @@ function navigateToModule(mod: AnalysisModule): void {
     router.push({ name: 'cocitations' });
     return;
   }
-  // Other modules remain as placeholders for future implementation
-  // eslint-disable-next-line no-console
-  console.log(`Navigate to module: ${mod.id}`);
+  // Other modules remain as placeholders for future implementation.
 }
 
 function dismissModal(): void {

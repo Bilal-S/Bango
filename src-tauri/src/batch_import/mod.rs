@@ -1,4 +1,3 @@
-#![allow(clippy::expect_used)]
 //! 5-phase pipeline scanning the Bango Documents directory for files produced
 //! by external tools and importing them into the article database by DOI match:
 //! 1. Full Text (`fulltext/`): attach `{normalized_doi}.pdf/.txt`. Skips
@@ -26,10 +25,11 @@
 //! lock contract.
 use crate::db::app_settings_repo;
 use crate::db::article_repo::{self, ArticleDoiInfo};
-use crate::db::connection::DbState;
+use crate::db::connection::{lock_state, DbState};
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
 
@@ -140,17 +140,19 @@ pub struct BatchImportProgress {
     pub summaries: Option<BatchImportPhaseResult>,
 }
 
-/// Managed state: cancel token + progress snapshot. Uses `std::sync::Mutex`
-/// so per-item progress callbacks fire synchronously without `.await`.
+/// Managed state: cancel token + progress snapshot. The cancel token is a
+/// lock-free `AtomicBool` (cannot poison, no contention on checks); progress
+/// uses `std::sync::Mutex` so per-item progress callbacks fire synchronously
+/// without `.await`.
 pub struct BatchImportState {
-    cancel_token: Arc<Mutex<bool>>,
+    cancel_token: Arc<AtomicBool>,
     progress: Arc<Mutex<BatchImportProgress>>,
 }
 
 impl Default for BatchImportState {
     fn default() -> Self {
         Self {
-            cancel_token: Arc::new(Mutex::new(false)),
+            cancel_token: Arc::new(AtomicBool::new(false)),
             progress: Arc::new(Mutex::new(BatchImportProgress::default())),
         }
     }
@@ -158,7 +160,7 @@ impl Default for BatchImportState {
 
 impl BatchImportState {
     /// Cloned cancel token for background tasks.
-    pub fn cancel_handle(&self) -> Arc<Mutex<bool>> {
+    pub fn cancel_handle(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.cancel_token)
     }
 
@@ -210,30 +212,44 @@ fn emit_progress(
         translations: translations.clone(),
         summaries: summaries.clone(),
     };
-    {
-        let mut guard = progress.lock().expect("batch import mutex");
-        guard.phase = payload.phase;
-        guard.phase_name = payload.phase_name.clone();
-        guard.completed = payload.completed;
-        guard.total = payload.total;
-        guard.overall_percent = payload.overall_percent;
-        guard.message = payload.message.clone();
-        guard.is_running = payload.is_running;
-        guard.is_cancelled = payload.is_cancelled;
-        if full_text.is_some() {
-            guard.full_text = full_text;
-        }
-        if citations.is_some() {
-            guard.citations = citations;
-        }
-        if translations.is_some() {
-            guard.translations = translations;
-        }
-        if summaries.is_some() {
-            guard.summaries = summaries;
-        }
+    if let Err(e) = apply_progress_snapshot(progress, &payload) {
+        // Progress is advisory UI state: a poisoned mutex must not abort the
+        // pipeline. The event still carries the local payload.
+        eprintln!("[batch-import] progress snapshot skipped: {e}");
     }
     let _ = app_handle.emit("batch-import:progress", payload);
+}
+
+/// Merge one progress snapshot into the shared progress state. Scalar fields
+/// overwrite; per-phase results overwrite only when `Some`. Poison maps to
+/// [`AppError::LockPoisoned`] - progress is advisory, so callers log + skip.
+/// `pub` for the integration tests in `tests/batch_import/`.
+pub fn apply_progress_snapshot(
+    progress: &Mutex<BatchImportProgress>,
+    payload: &BatchImportProgress,
+) -> Result<(), AppError> {
+    let mut guard = lock_state(progress)?;
+    guard.phase = payload.phase;
+    guard.phase_name = payload.phase_name.clone();
+    guard.completed = payload.completed;
+    guard.total = payload.total;
+    guard.overall_percent = payload.overall_percent;
+    guard.message = payload.message.clone();
+    guard.is_running = payload.is_running;
+    guard.is_cancelled = payload.is_cancelled;
+    if payload.full_text.is_some() {
+        guard.full_text = payload.full_text.clone();
+    }
+    if payload.citations.is_some() {
+        guard.citations = payload.citations.clone();
+    }
+    if payload.translations.is_some() {
+        guard.translations = payload.translations.clone();
+    }
+    if payload.summaries.is_some() {
+        guard.summaries = payload.summaries.clone();
+    }
+    Ok(())
 }
 
 /// Start the batch import pipeline. Returns immediately after spawning the
@@ -252,7 +268,7 @@ pub async fn start_batch_import(
 ) -> Result<BatchImportProgress, AppError> {
     // ── Concurrent-start guard ──
     {
-        let guard = batch_state.progress.lock().expect("batch import mutex");
+        let guard = lock_state(&batch_state.progress)?;
         if guard.is_running {
             return Ok(guard.clone());
         }
@@ -260,12 +276,8 @@ pub async fn start_batch_import(
 
     // Reset cancel token + progress snapshot.
     let cancel_handle = batch_state.cancel_handle();
-    {
-        let mut token = cancel_handle.lock().expect("batch import mutex");
-        *token = false;
-        let mut prog = batch_state.progress.lock().expect("batch import mutex");
-        *prog = BatchImportProgress::default();
-    }
+    cancel_handle.store(false, Ordering::Relaxed);
+    *lock_state(&batch_state.progress)? = BatchImportProgress::default();
 
     let auto_sum = auto_summarize.unwrap_or(false);
     let include_sections = include_section_summaries.unwrap_or(false);
@@ -330,10 +342,7 @@ pub async fn start_batch_import(
         let p1_cancel = Arc::clone(&cancel_for_task);
         let p1_progress = Arc::clone(&progress);
         let p1_app = app_handle_clone.clone();
-        let is_cancelled = move || {
-            let guard = p1_cancel.try_lock();
-            matches!(guard, Ok(g) if *g)
-        };
+        let is_cancelled = move || p1_cancel.load(Ordering::Relaxed);
         let mut on_progress = move |processed: usize, total: usize, msg: &str| {
             let overall = percent(processed, total) / 4;
             emit_progress(
@@ -410,26 +419,25 @@ pub async fn start_batch_import(
             None,
         );
 
-        // Check cancel after phase 1.
-        if let Ok(g) = cancel_for_task.try_lock() {
-            if *g {
-                emit_progress(
-                    &app_handle_clone,
-                    &progress,
-                    BatchImportPhase::FullText,
-                    ft_result.processed,
-                    ft_result.total,
-                    ft_percent / 4,
-                    "Cancelled by user",
-                    false,
-                    true,
-                    Some(ft_result),
-                    None,
-                    None,
-                    None,
-                );
-                return;
-            }
+        // Check cancel after phase 1 (lock-free load; the old `try_lock`
+        // could silently skip the check on contention).
+        if cancel_for_task.load(Ordering::Relaxed) {
+            emit_progress(
+                &app_handle_clone,
+                &progress,
+                BatchImportPhase::FullText,
+                ft_result.processed,
+                ft_result.total,
+                ft_percent / 4,
+                "Cancelled by user",
+                false,
+                true,
+                Some(ft_result),
+                None,
+                None,
+                None,
+            );
+            return;
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -439,10 +447,7 @@ pub async fn start_batch_import(
         let p2_progress = Arc::clone(&progress);
         let p2_app = app_handle_clone.clone();
         let p2_ft = ft_result.clone();
-        let is_cancelled = move || {
-            let guard = p2_cancel.try_lock();
-            matches!(guard, Ok(g) if *g)
-        };
+        let is_cancelled = move || p2_cancel.load(Ordering::Relaxed);
         let mut on_progress = move |processed: usize, total: usize, msg: &str| {
             let overall = 25 + percent(processed, total) / 4;
             emit_progress(
@@ -496,26 +501,25 @@ pub async fn start_batch_import(
             None,
         );
 
-        // Check cancel after phase 2.
-        if let Ok(g) = cancel_for_task.try_lock() {
-            if *g {
-                emit_progress(
-                    &app_handle_clone,
-                    &progress,
-                    BatchImportPhase::Citations,
-                    cit_result.processed,
-                    cit_result.total,
-                    25 + cit_percent / 4,
-                    "Cancelled by user",
-                    false,
-                    true,
-                    Some(ft_result),
-                    Some(cit_result),
-                    None,
-                    None,
-                );
-                return;
-            }
+        // Check cancel after phase 2 (lock-free load; the old `try_lock`
+        // could silently skip the check on contention).
+        if cancel_for_task.load(Ordering::Relaxed) {
+            emit_progress(
+                &app_handle_clone,
+                &progress,
+                BatchImportPhase::Citations,
+                cit_result.processed,
+                cit_result.total,
+                25 + cit_percent / 4,
+                "Cancelled by user",
+                false,
+                true,
+                Some(ft_result),
+                Some(cit_result),
+                None,
+                None,
+            );
+            return;
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -554,7 +558,7 @@ pub async fn start_batch_import(
                 &mut on_progress,
                 move || {
                     let snap = Arc::clone(&cancel_snap);
-                    async move { *snap.lock().expect("batch import mutex") }
+                    async move { snap.load(Ordering::Relaxed) }
                 },
             )
             .await
@@ -588,26 +592,25 @@ pub async fn start_batch_import(
             None,
         );
 
-        // Check cancel after phase 3.
-        if let Ok(g) = cancel_for_task.try_lock() {
-            if *g {
-                emit_progress(
-                    &app_handle_clone,
-                    &progress,
-                    BatchImportPhase::Translations,
-                    trn_result.processed,
-                    trn_result.total,
-                    50 + trn_percent / 4,
-                    "Cancelled by user",
-                    false,
-                    true,
-                    Some(ft_result),
-                    Some(cit_result),
-                    Some(trn_result),
-                    None,
-                );
-                return;
-            }
+        // Check cancel after phase 3. Lock-free load: unlike the old
+        // `try_lock` check, contention can never silently skip the cancel.
+        if cancel_for_task.load(Ordering::Relaxed) {
+            emit_progress(
+                &app_handle_clone,
+                &progress,
+                BatchImportPhase::Translations,
+                trn_result.processed,
+                trn_result.total,
+                50 + trn_percent / 4,
+                "Cancelled by user",
+                false,
+                true,
+                Some(ft_result),
+                Some(cit_result),
+                Some(trn_result),
+                None,
+            );
+            return;
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -669,7 +672,7 @@ pub async fn start_batch_import(
                 &mut on_progress,
                 move || {
                     let snap = Arc::clone(&cancel_snap);
-                    async move { *snap.lock().expect("batch import mutex") }
+                    async move { snap.load(Ordering::Relaxed) }
                 },
             )
             .await
@@ -755,28 +758,25 @@ pub async fn start_batch_import(
         );
     });
 
-    let guard = batch_state.progress.lock().expect("batch import mutex");
+    let guard = lock_state(&batch_state.progress)?;
     Ok(guard.clone())
 }
 
 /// Cancel a running batch import. Checked between items; in-flight LLM
-/// requests complete naturally. `expect()` on the cancel-token mutex is a
-/// poisoned-mutex panic point.
-#[allow(clippy::expect_used)]
+/// requests complete naturally. The token is a lock-free `AtomicBool`, so
+/// there is no poison path.
 #[tauri::command]
 pub async fn cancel_batch_import(batch_state: State<'_, BatchImportState>) -> Result<(), AppError> {
-    let handle = batch_state.cancel_handle();
-    *handle.lock().expect("batch import mutex") = true;
+    batch_state.cancel_handle().store(true, Ordering::Relaxed);
     Ok(())
 }
 
-/// Current progress snapshot (for polling or initial load). `expect()` on the
-/// progress mutex is a poisoned-mutex panic point.
-#[allow(clippy::expect_used)]
+/// Current progress snapshot (for polling or initial load). A poisoned
+/// progress mutex maps to `AppError::LockPoisoned`.
 #[tauri::command]
 pub async fn get_batch_import_progress(
     batch_state: State<'_, BatchImportState>,
 ) -> Result<BatchImportProgress, AppError> {
-    let guard = batch_state.progress.lock().expect("batch import mutex");
+    let guard = lock_state(&batch_state.progress)?;
     Ok(guard.clone())
 }

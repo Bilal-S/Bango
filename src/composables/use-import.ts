@@ -52,14 +52,14 @@ type ImportFormat = 'ris' | 'bibtex';
 export type ImportStep = 'upload' | 'parse' | 'zotero' | 'import' | 'complete';
 
 /** Attachment tallies reported by the Zotero import command. */
-export interface ZoteroAttachmentSummary {
+interface ZoteroAttachmentSummary {
   attachedCount: number;
   failedCount: number;
   skippedCount: number;
 }
 
 /** Zotero-specific preview metadata shown on the review + complete steps. */
-export interface ZoteroPreviewMeta {
+interface ZoteroPreviewMeta {
   collectionName: string;
   totalItems: number;
   attachmentCount: number;

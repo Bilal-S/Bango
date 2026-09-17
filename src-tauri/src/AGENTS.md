@@ -85,8 +85,9 @@ delete before restarting.
 
 - All LLM calls MUST flow through `LlmOrchestrator` (see `llm/AGENTS.md`),
   never `client::send_chat_completion` directly from command handlers.
-- All `DbState.conn` locks MUST route through `db::lock_conn` (see
-  `db/AGENTS.md`).
+- All `DbState.conn` locks MUST route through `db::lock_conn`; managed-state
+  mutexes that do not hold a `Connection` MUST route through
+  `db::connection::lock_state` (see `db/AGENTS.md`).
 - `PRAGMA foreign_keys=ON` is set on every connection - the cascade contract
   depends on it.
 - See `docs/CLAUDE.md` for the project coding rules (Rust/TS error handling,

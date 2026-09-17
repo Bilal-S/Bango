@@ -2,7 +2,7 @@
 //!
 //! Heals legacy mixed-case, prefixed, and whitespace-wrapped DOIs, merges
 //! case-variant duplicate `reference_papers`, and rebuilds the DOI unique
-//! index case-insensitively on `LOWER(doi)`. See `.worktrees/doifix.md`.
+//! index case-insensitively on `LOWER(doi)`.
 //!
 //! ## Why statement order matters
 //!
