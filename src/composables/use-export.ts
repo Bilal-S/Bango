@@ -22,6 +22,9 @@ const wikiExportResult = ref<GenerateExportResult | null>(null);
 /** Shared save-dialog filter set for RIS exports. */
 const RIS_FILTERS = [{ name: 'RIS File', extensions: ['ris'] }];
 
+/** Shared save-dialog filter set for BibTeX exports. */
+const BIBTEX_FILTERS = [{ name: 'BibTeX File', extensions: ['bib'] }];
+
 export function useExport() {
   const exporting = ref(false);
   const error = ref<string | null>(null);
@@ -80,6 +83,11 @@ export function useExport() {
   /** Export the Included list to RIS. */
   function exportRis(): Promise<boolean> {
     return runExport('export_ris_to_file', {}, 'included-articles.ris');
+  }
+
+  /** Export the Included list to BibTeX (.bib). */
+  function exportBibtex(): Promise<boolean> {
+    return runExport('export_bibtex_to_file', {}, 'included-articles.bib', BIBTEX_FILTERS);
   }
 
   /** Export one status tab to RIS (`screeningErrorsOnly` for the Error tab). */
@@ -223,6 +231,7 @@ export function useExport() {
     exporting,
     error,
     exportRis,
+    exportBibtex,
     exportRisForTab,
     exportRisForIds,
     exportProject,

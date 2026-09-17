@@ -6,7 +6,7 @@ use rand::RngExt;
 
 use crate::error::AppError;
 
-use super::search::build_search_url;
+use super::search::build_request_url;
 use super::OpenAlexApiResponse;
 use super::OpenAlexFilters;
 
@@ -25,7 +25,7 @@ pub async fn search_works(
     mailto: &str,
     api_key: Option<&str>,
 ) -> Result<OpenAlexApiResponse, AppError> {
-    let url = build_search_url(query, filters, sort, per_page, page, mailto, api_key);
+    let url = build_request_url(query, filters, sort, per_page, page, mailto, api_key);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .build()

@@ -12,6 +12,7 @@ import {
   type OpenAlexFilters,
 } from '@/types/openalex';
 import ClearableInput from '@/components/clearable-input.vue';
+import { isDoiQuery } from '@/utils/doi-query';
 import OpenAlexResultItem from './openalex-result-item.vue';
 import OpenAlexDetailPanel from './openalex-detail-panel.vue';
 
@@ -41,6 +42,10 @@ async function handleSearch(): Promise<void> {
 function handleClear(): void {
   store.clearSearch();
 }
+
+/** Cosmetic DOI-direct hint; mirrors the backend's `extract_doi_query` gate
+ * via the shared pure util, so it can never disagree with the URL built. */
+const doiDetected = computed(() => isDoiQuery(store.query));
 
 // ── Search Options panel ────────────────────────────────────────────────
 /* Collapsible panel exposing the OpenAlexFilters dimensions the backend
@@ -219,6 +224,13 @@ async function handleAddSingle(): Promise<void> {
             {{ store.smartSearchLoading ? 'Generating...' : 'Smart Search' }}
           </button>
         </div>
+
+        <!-- DOI-direct hint: shown while the query box holds a DOI; the
+             backend fetches that exact work instead of a keyword search. -->
+        <p v-if="doiDetected" class="doi-hint" data-test="doi-hint">
+          <span class="material-symbols-outlined">link</span>
+          DOI detected - fetching the exact match
+        </p>
 
         <!-- Collapsible SEARCH OPTIONS box. Mirrors the `article-metadata.vue`
              "Metadata" box: border+rounded container, header row, v-show body
@@ -551,6 +563,20 @@ async function handleAddSingle(): Promise<void> {
 .search-input-wrap {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* Cosmetic DOI-direct hint line under the search row. */
+.doi-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 0 0;
+  font-size: var(--font-size-caption, 13px);
+  color: var(--color-on-surface-variant, #464555);
+}
+.doi-hint .material-symbols-outlined {
+  font-size: 16px;
+  flex-shrink: 0;
 }
 
 /* The main search input is the inner <input> of ClearableInput. The component

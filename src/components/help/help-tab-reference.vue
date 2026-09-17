@@ -1073,7 +1073,9 @@ ER  - </pre>
 
             <h3>Searching</h3>
             <p>
-              Type your terms and press Search. If an AI provider is configured, the Smart Search
+              Type your terms and press Search. Pasting a DOI (bare, or as a doi.org link) skips the
+              keyword search and fetches that exact work instead; a small hint under the box
+              confirms the DOI was detected. If an AI provider is configured, the Smart Search
               button can turn your research aims and criteria into a Boolean query for you. The
               collapsible Search Options box narrows the field before you search: work type
               (articles, reviews, book chapters, and more), a publication year range, language,
@@ -2422,6 +2424,19 @@ ER  - </pre>
                 typing <code>DELETE</code> to confirm.
               </li>
             </ul>
+
+            <h3>Exporting Your Articles</h3>
+            <p>
+              The Export dialog (article-list toolbar or the PRISMA view) also writes bibliography
+              files: <strong>RIS</strong> for the Included list, the current tab, or selected
+              articles, and <strong>BibTeX</strong> (<code>.bib</code>) for the Included list, which
+              is what you want when writing the manuscript in LaTeX. BibTeX citation keys are
+              generated as first-author-surname + year + first significant title word (with letter
+              suffixes on collisions). The <code>.bib</code> file carries the same fields as the RIS
+              export (abstract, language, ISSN, keywords including <code>Bango:</code>-prefixed tags
+              and labels, imported notes, AI reasoning, user notes, and the matched-criteria
+              payload), so nothing is lost when switching between the two formats.
+            </p>
 
             <h3>Starting a New Project</h3>
             <p>

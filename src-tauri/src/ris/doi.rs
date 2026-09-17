@@ -35,3 +35,11 @@ pub fn normalize_doi(doi: Option<&str>) -> Option<String> {
     }
     Some(stripped.to_ascii_lowercase())
 }
+
+/// True when `text` looks like a bare DOI: starts with `10.` and contains
+/// `/`. Operates on already-trimmed text; the single definition shared by
+/// the CR parser's DOI detection and the OpenAlex DOI-direct search gate.
+#[must_use]
+pub fn is_bare_doi(text: &str) -> bool {
+    text.starts_with("10.") && text.contains('/')
+}

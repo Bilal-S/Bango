@@ -7,6 +7,7 @@
 //! - Minimum required: author + (year or identifiable fields).
 
 use crate::models::reference::NewReferencePaper;
+use crate::ris::doi::is_bare_doi;
 
 /// Strips WoS escaping: `{[}` → `[`, `{*}` → removed, trailing `.`/`].` → removed.
 #[must_use]
@@ -52,13 +53,13 @@ pub fn extract_doi(text: &str) -> Option<String> {
         let first_entry = inner.split(',').next().unwrap_or(inner).trim();
         let first_entry = first_entry.strip_prefix("DOI ").unwrap_or(first_entry).trim();
         let first_entry = first_entry.trim_end_matches(']');
-        if first_entry.starts_with("10.") && first_entry.contains('/') {
+        if is_bare_doi(first_entry) {
             return Some(first_entry.to_string());
         }
     }
 
     // Simple DOI: starts with "10." and contains '/'
-    if text.starts_with("10.") && text.contains('/') {
+    if is_bare_doi(text) {
         return Some(text.to_string());
     }
 
@@ -161,7 +162,7 @@ pub fn parse_cr_line(cr_line: &str) -> Option<NewReferencePaper> {
         }
 
         // Bare DOI: starts with "10." and contains '/'
-        if trimmed.starts_with("10.") && trimmed.contains('/') {
+        if is_bare_doi(trimmed) {
             if paper.doi.is_none() {
                 paper.doi = Some(trimmed.to_string());
             }

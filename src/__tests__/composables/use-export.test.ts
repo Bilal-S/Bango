@@ -66,4 +66,33 @@ describe('useExport - RIS export scaffold (refactor1 Tier 0)', () => {
     expect(error.value).toBe('RIS export failed');
     expect(exporting.value).toBe(false);
   });
+
+  it('export_bibtex_passes_path_and_bib_filter', async () => {
+    vi.mocked(save).mockResolvedValue('/tmp/included-articles.bib');
+
+    const { exportBibtex } = useExport();
+    const result = await exportBibtex();
+
+    expect(result).toBe(true);
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultPath: 'included-articles.bib',
+        filters: [{ name: 'BibTeX File', extensions: ['bib'] }],
+      })
+    );
+    expect(tauriCommand).toHaveBeenCalledWith('export_bibtex_to_file', {
+      path: '/tmp/included-articles.bib',
+    });
+  });
+
+  it('export_bibtex_reports_invoke_error', async () => {
+    vi.mocked(save).mockResolvedValue('/tmp/included-articles.bib');
+    vi.mocked(tauriCommand).mockRejectedValue(new Error('BibTeX export failed'));
+
+    const { exportBibtex, error } = useExport();
+    const result = await exportBibtex();
+
+    expect(result).toBe(false);
+    expect(error.value).toBe('BibTeX export failed');
+  });
 });

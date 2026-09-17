@@ -44,6 +44,14 @@ for **Import Backup** - see `export/AGENTS.md`. Tested in
 `tests/export/reset_project_test.rs` (preserve keeps the row verbatim, no-row
 no-op, default wipe) + `tests/export/project_backup_test.rs`.
 
+### `export_cmd.rs` - file exports
+
+`export_bibtex_to_file` writes the Included list as a `.bib` via
+`bibtex::writer::articles_to_bibtex` over the shared `to_export_articles`
+projection (empty criteria map - BibTeX carries no criteria fields). v1 scope
+is the Included list only; tab/ids BibTeX variants are a deliberate non-goal.
+The RIS commands and `articles_to_ris_export` are unchanged.
+
 ### `tags.rs` + `labels.rs`
 
 Tag & Label management commands (v6.9 standard-taxonomy surfacing). `tags.rs`

@@ -14,16 +14,18 @@ use crate::export::project;
 use crate::export::ris_writer::{articles_to_ris, RisExportArticle};
 use crate::wiki::storage;
 
-/// Convert articles to RIS string, resolving criteria labels.
-fn articles_to_ris_export(
+/// Map `Article` rows to the shared export projection, resolving criterion
+/// UUIDs to their text (an empty map yields empty criteria lists, e.g. for
+/// the BibTeX writer which carries no criteria fields).
+fn to_export_articles(
     articles: &[crate::models::article::Article],
     criteria_map: &HashMap<String, String>,
-) -> String {
+) -> Vec<RisExportArticle> {
     let resolve_criteria = |ids: &[String]| -> Vec<String> {
         ids.iter().filter_map(|id| criteria_map.get(id).cloned()).collect()
     };
 
-    let export_articles: Vec<RisExportArticle> = articles
+    articles
         .iter()
         .map(|a| RisExportArticle {
             reference_type: a.reference_type.clone(),
@@ -51,9 +53,15 @@ fn articles_to_ris_export(
             matched_inclusion_criteria: resolve_criteria(&a.matched_inclusion_criteria),
             matched_exclusion_criteria: resolve_criteria(&a.matched_exclusion_criteria),
         })
-        .collect();
+        .collect()
+}
 
-    articles_to_ris(&export_articles)
+/// Convert articles to RIS string, resolving criteria labels.
+fn articles_to_ris_export(
+    articles: &[crate::models::article::Article],
+    criteria_map: &HashMap<String, String>,
+) -> String {
+    articles_to_ris(&to_export_articles(articles, criteria_map))
 }
 
 /// Build the criteria lookup map (id -> text).
@@ -72,6 +80,18 @@ pub fn export_ris(db_state: State<'_, DbState>) -> Result<String, AppError> {
 #[tauri::command]
 pub fn export_ris_to_file(db_state: State<'_, DbState>, path: String) -> Result<(), AppError> {
     let content = export_ris(db_state)?;
+    std::fs::write(path, content).map_err(AppError::Io)
+}
+
+/// Export the Included list as a BibTeX (.bib) file. v1 scope: the Included
+/// list only; tab/ids variants are a deliberate non-goal (mirror the RIS
+/// commands above if ever needed).
+#[tauri::command]
+pub fn export_bibtex_to_file(db_state: State<'_, DbState>, path: String) -> Result<(), AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    let articles = article_repo::get_articles_by_status(&conn, "included")?;
+    let content =
+        crate::bibtex::writer::articles_to_bibtex(&to_export_articles(&articles, &HashMap::new()));
     std::fs::write(path, content).map_err(AppError::Io)
 }
 

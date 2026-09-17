@@ -145,6 +145,8 @@ directories are indexed inline.
   `google-trends.ts`, `wiki-markdown.ts`, `wiki-site-export.ts`,
   `platform.ts`, `article-keyboard-navigation.ts`, `article-deep-links.ts`
   (pure `parseArticleRouteQuery` for Articles-view deep-links),
+  `doi-query.ts` (pure `normalizeDoiQuery`/`isDoiQuery` mirroring the Rust
+  DOI-direct gate; drives the OpenAlex search hint),
   `cluster-members.ts` (pure `collectClusterMembers` for cluster thematic
   analysis; collects visible members only, skipping `hidden` nodes whose
   cluster ids can go stale after a recalculate).

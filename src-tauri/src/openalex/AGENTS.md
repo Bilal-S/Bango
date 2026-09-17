@@ -43,6 +43,19 @@ DOI normalization delegates to the canonical `ris::doi::normalize_doi`
 (trim, ASCII case-insensitive prefix strip, placeholder filter, lowercase) -
 the module has no DOI normalizer of its own.
 
+### DOI-direct search (`search.rs`)
+
+`extract_doi_query` canonicalizes the query via `ris::doi::normalize_doi` and
+requires the bare-DOI shape (`ris::doi::is_bare_doi`, the single definition the
+CR parser also uses). On detection, `build_request_url` (called by
+`client::search_works`) routes to `build_doi_direct_url`, which fetches the
+exact work with `filter=doi:https://doi.org/{canonical}` and deliberately
+omits `search=`, `sort` (`relevance_score` needs a search), `has_abstract:true`,
+and every optional filter - a pasted DOI is unambiguous intent, so no filter
+may silently hide the exact work; retraction surfaces via the result badge.
+The frontend hint (`openalex-search.vue`) reads the pure mirror
+`src/utils/doi-query.ts` so UI and backend can never disagree.
+
 ### Smart Search (`smart_search.rs`)
 
 LLM-generated Boolean query from aims + criteria via
@@ -99,7 +112,9 @@ domain set).
 
 - `tests/openalex/openalex_mapping_test.rs` (11 tests incl.
   `deserialize_harvest_response_missing_fields`)
-- `tests/openalex/openalex_search_test.rs` (5 tests)
+- `tests/openalex/openalex_search_test.rs` (9 tests incl. DOI-direct
+  `extract_doi_query` + `build_doi_direct_url`/`build_request_url` filter
+  bypass)
 - `tests/openalex/openalex_import_test.rs` (5 tests + 1 ignored Tier 2 stub)
 - `tests/openalex/openalex_smart_search_test.rs` (15 tests: prompt char-limit/stemming/
   wildcard, `truncate_search_query` balance + word-boundary, parser over-long

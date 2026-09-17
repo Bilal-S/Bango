@@ -166,8 +166,16 @@ described inline.
   upload). See `zotero/AGENTS.md`.
 - **`models/`** - Serde structs shared across modules. No own `AGENTS.md`.
 - **`dedup/`** - Duplicate detection. No own `AGENTS.md`.
-- **`ris/`** + **`bibtex/`** - Bibliographic format parsers/converters. No own
-  `AGENTS.md`.
+- **`ris/`** + **`bibtex/`** - Bibliographic format parsers/converters plus
+  the BibTeX export writer (`bibtex/writer.rs`: reverse of the converter
+  field mappings, ASCII-folded citation keys with letter-suffix dedup, full
+  RIS field parity - `abstract`, `language`, `issn`, `annote` notes,
+  `comment` AI reasoning, `note` user notes, the `Bango:`-prefixed keywords
+  union, and the `bango-criteria` C8 mirror with raw balanced braces; pure,
+  tested from `tests/bibtex/bibtex_writer_test.rs`; consumed by
+  `export_cmd::export_bibtex_to_file`). `ris::doi` is the single
+  DOI identity source incl. `is_bare_doi`, shared by the CR parser and the
+  OpenAlex DOI-direct gate. No own `AGENTS.md`.
 - **`prisma/`** - PRISMA flow data (`data.rs`) + the screening reasons report
   (`report.rs`): primary-reason attribution (highest criterion priority wins,
   ties broken by first-assigned order = earliest UUID in the article's matched

@@ -6,6 +6,7 @@ vi.mock('@/composables/use-export', () => ({
     exporting: { value: false },
     error: { value: null },
     exportRis: vi.fn().mockResolvedValue(true),
+    exportBibtex: vi.fn().mockResolvedValue(true),
     exportRisForTab: vi.fn().mockResolvedValue(true),
     exportProject: vi.fn().mockResolvedValue(true),
     generateWikiSite: vi.fn().mockResolvedValue(false),
@@ -38,6 +39,7 @@ describe('export-dialog.vue option list', () => {
     const wrapper = mountDialog({ activeTab: 'prisma' });
     expect(optionLabels(wrapper)).toEqual([
       'Export Included Articles (RIS)',
+      'Export Included Articles (BibTeX)',
       'Export Included Articles (Zotero)',
       'Export Project Backup',
       'Export Wiki Website',
@@ -48,6 +50,7 @@ describe('export-dialog.vue option list', () => {
     const wrapper = mountDialog();
     expect(optionLabels(wrapper)).toEqual([
       'Export Included Articles (RIS)',
+      'Export Included Articles (BibTeX)',
       'Export Included Articles (Zotero)',
       'Export Project Backup',
       'Export Wiki Website',
@@ -65,14 +68,19 @@ describe('export-dialog.vue option list', () => {
   });
 
   it('all_option_buttons_share_the_wiki_button_secondary_style', () => {
-    const contexts: { activeTab?: string; statusCounts?: Record<string, number> }[] = [
-      { activeTab: 'prisma' },
-      { activeTab: 'working', statusCounts: { working: 5 } },
+    /* Default/PRISMA surface carries the BibTeX option; the tab-aware
+     * surface keeps RIS + Zotero (BibTeX v1 is Included-list only). */
+    const contexts: {
+      props: { activeTab?: string; statusCounts?: Record<string, number> };
+      buttonCount: number;
+    }[] = [
+      { props: { activeTab: 'prisma' }, buttonCount: 5 },
+      { props: { activeTab: 'working', statusCounts: { working: 5 } }, buttonCount: 4 },
     ];
-    for (const props of contexts) {
+    for (const { props, buttonCount } of contexts) {
       const wrapper = mountDialog(props);
       const buttons = wrapper.findAll('.dialog__options button');
-      expect(buttons).toHaveLength(4);
+      expect(buttons).toHaveLength(buttonCount);
       for (const button of buttons) {
         expect(button.classes()).toContain('btn--secondary');
         expect(button.classes()).not.toContain('btn--primary');

@@ -53,6 +53,8 @@ Repository/KPI tests live in `biblio/biblio_repo_tests.rs` (in-memory SQLite via
 `biblio/biblio_networks_test.rs`. Unit-test extractions:
 `biblio/biblio_normalizer_test.rs`, `biblio/biblio_models_test.rs`,
 `bibtex/bibtex_parser_test.rs`, `bibtex/bibtex_converter_test.rs`,
+`bibtex/bibtex_writer_test.rs` (BibTeX export writer: parser round-trip,
+citation-key shape/dedup, pages/escaping/full-RIS-parity keywords union),
 `ris/cr_parser_test.rs`, `ris/doi_test.rs`, `ris/n1_parser_test.rs`,
 `screening/screening_engine_test.rs`, `utils/pdf_extract_test.rs`,
 `scraping/browser_test.rs`. Co-citation integration tests

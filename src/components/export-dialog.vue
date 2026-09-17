@@ -14,6 +14,7 @@ const {
   exporting,
   error,
   exportRis,
+  exportBibtex,
   exportRisForTab,
   exportProject,
   generateWikiSite,
@@ -110,6 +111,17 @@ const zoteroButtonLabel = computed(() =>
             "
           >
             Export Included Articles (RIS)
+          </button>
+          <button
+            class="btn btn--secondary"
+            :disabled="exporting"
+            @click="
+              async () => {
+                if (await exportBibtex()) emit('close');
+              }
+            "
+          >
+            Export Included Articles (BibTeX)
           </button>
         </template>
 
