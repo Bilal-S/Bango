@@ -12,5 +12,6 @@ mod wiki_grounding_test;
 mod wiki_index_drift_test;
 mod wiki_ingest_test;
 mod wiki_methods_preseed_test;
+mod wiki_obsidian_export_test;
 mod wiki_summary_export_test;
 mod wiki_test;

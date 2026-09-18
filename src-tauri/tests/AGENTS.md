@@ -86,7 +86,11 @@ keyword curation); binding inventory:
 `wiki_summary_export_test.rs`) covers the frameworks pipeline (canonical
 clustering, alias merges, skeleton pre-seed, LLM polish + fallback, blob
 schema/merge, article links); binding inventory:
-`docs/test-plans/wiki-frameworks-tests.md`. `utils/sections_test.rs` +
+`docs/test-plans/wiki-frameworks-tests.md`.
+`wiki/wiki_obsidian_export_test.rs` covers the Obsidian vault export (slug
+map + aliases, frontmatter/body rewrites, vault staging incl. the whole-vault
+no-UUID guard, orphan/collision fallbacks, zip round-trip); binding
+inventory: `docs/test-plans/wiki-export-tests.md`. `utils/sections_test.rs` +
 `utils/chunking_test.rs` cover the utils text-classification + chunking.
 `biblio/biblio_cluster_themes_test.rs` covers the cluster thematic analysis pure
 helpers (resolution dispatcher, three-source term resolution, Top-N cap,

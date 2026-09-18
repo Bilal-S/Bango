@@ -9,6 +9,7 @@ vi.mock('@/composables/use-export', () => ({
     exportBibtex: vi.fn().mockResolvedValue(true),
     exportRisForTab: vi.fn().mockResolvedValue(true),
     exportProject: vi.fn().mockResolvedValue(true),
+    exportObsidian: vi.fn().mockResolvedValue(true),
     generateWikiSite: vi.fn().mockResolvedValue(false),
     openWikiExport: vi.fn(),
     downloadWikiZip: vi.fn().mockResolvedValue(true),
@@ -43,6 +44,7 @@ describe('export-dialog.vue option list', () => {
       'Export Included Articles (Zotero)',
       'Export Project Backup',
       'Export Wiki Website',
+      'Export to Obsidian',
     ]);
   });
 
@@ -54,6 +56,7 @@ describe('export-dialog.vue option list', () => {
       'Export Included Articles (Zotero)',
       'Export Project Backup',
       'Export Wiki Website',
+      'Export to Obsidian',
     ]);
   });
 
@@ -64,6 +67,7 @@ describe('export-dialog.vue option list', () => {
       'Export Working Articles (Zotero)',
       'Export Project Backup',
       'Export Wiki Website',
+      'Export to Obsidian',
     ]);
   });
 
@@ -74,8 +78,8 @@ describe('export-dialog.vue option list', () => {
       props: { activeTab?: string; statusCounts?: Record<string, number> };
       buttonCount: number;
     }[] = [
-      { props: { activeTab: 'prisma' }, buttonCount: 5 },
-      { props: { activeTab: 'working', statusCounts: { working: 5 } }, buttonCount: 4 },
+      { props: { activeTab: 'prisma' }, buttonCount: 6 },
+      { props: { activeTab: 'working', statusCounts: { working: 5 } }, buttonCount: 5 },
     ];
     for (const { props, buttonCount } of contexts) {
       const wrapper = mountDialog(props);

@@ -9,8 +9,8 @@ article corpus.
 ## Ownership
 
 - Owns: `storage.rs`, `agents_contract.rs`, `templates.rs`, `frontmatter.rs`,
-  `raw_export.rs`, `fts.rs`, `engine.rs`, `chat.rs`, `ingest/` (directory
-  module), `mod.rs`.
+  `raw_export.rs`, `fts.rs`, `engine.rs`, `chat.rs`, `obsidian_export.rs`,
+  `ingest/` (directory module), `mod.rs`.
 - Commands live in `commands/wiki_cmd/` (directory module).
 - Frontend: `wiki-view.vue`, `wiki-toolbar.vue`, `wiki-page-viewer.vue`,
   `wiki-page-editor.vue`, `wiki-graph-panel.vue`; composable `use-wiki.ts`;
@@ -48,6 +48,30 @@ article corpus.
   row count) so chunk rows do not false-positive a rebuild on every chat call.
   `strip_table_placeholders` is `pub` so the integration test can exercise it
   directly.
+- `obsidian_export.rs` - Obsidian vault export pre-processing (pure, no DB /
+  Tauri state; the command layer in `commands/wiki_cmd/obsidian_export.rs`
+  loads article rows and calls in). `build_article_slug_map` renames article
+  (synthesis) pages to `{surname}{year}{title-word}` slugs via the shared
+  BibTeX helpers (`bibtex::writer::citation_key_from_parts` +
+  `dedupe_keys`; letter-suffix dedup, `anon`/`nd` fallbacks, ASCII folding)
+  with aliases `Surname et al. Year`. `rewrite_frontmatter` maps
+  `id`/`slug`/`source_articles`/`links` UUIDs to slugs (unmapped UUIDs fall
+  back to the page stem or are dropped) and strips `source_file` /
+  `source_hash`. `rewrite_body` maps `[[uuid]]` wikilinks (alias kept for
+  unmapped), `[^art-<uuid>]` refs + `/raw/<uuid>.md` definitions (rewritten
+  to `[[slug|Alias]]` wikilinks; missing definition blocks appended), and
+  bare `/raw/<uuid>.md` paths; unmapped UUIDs are dropped so the vault is
+  UUID-free. `write_vault` stages to `wiki-root/obsidian-export/` (cleared
+  each run, outside `wiki/` so FTS + drift detection are untouched):
+  renames synthesis files (cross-type filename collision guard, orphaned
+  pages fall back to their own frontmatter title or are skipped + counted in
+  `VaultStats.skipped_orphans`), skips `log.md` + `index.md`, writes a
+  generated `Home.md` + minimal `.obsidian/` config (`app.json` +
+  `graph.json` color groups per folder mirroring `wiki-graph-panel.vue`).
+  Frontend entry points (parity with "Export Website"): the
+  `wiki-toolbar.vue` Actions menu item (gated on `isInitialized()`) and the
+  shared export dialog button, both via `useExport().exportObsidian()`
+  (save dialog, zip filter, `wiki_export_obsidian`).
 - `ingest/` (directory module: LLM page generation - prompt builder,
   `<!-- PAGE:slug -->` response parser, page writer, FTS5 rebuild, parallel
   chunked ingest; submodules: `mod.rs` core pipeline + re-exports,
@@ -310,7 +334,8 @@ own the `skip_temperature` gate + retry-without-temperature path; see
 ### Commands (`commands/wiki_cmd/`)
 
 Directory module since refactor v6: `mod.rs` + `status.rs`, `raw_files.rs`,
-`pages.rs`, `search_lint.rs`, `chat.rs`, `ingest.rs`, `site_export.rs`; `pub
+`pages.rs`, `search_lint.rs`, `chat.rs`, `ingest.rs`, `site_export.rs`,
+`obsidian_export.rs`; `pub
 use` re-exports in `mod.rs` keep all `crate::commands::wiki_cmd::*` import
 paths identical, and glob re-exports surface the `#[tauri::command]`
 macro-generated `__tauri_command_name_*` consts the `lib.rs` `invoke_handler!`
@@ -326,7 +351,12 @@ frontend renders all HTML via `renderWikiMarkdown(staticMode)` + depth-aware
 `slugToHref`/`artIdToHref` resolvers and passes a `SiteExportBundle` to this
 command, which writes the staging dir, copies the wiki + user-doc Markdown
 tree, zips, and moves the zip to the frontend-chosen path; no
-`blocking_pick_file` in the backend).
+`blocking_pick_file` in the backend), and `wiki_export_obsidian`
+(single-step Obsidian vault export: brief DB lock to resolve the wiki root +
+load article rows ordered by `sequence_id`, then lock-free staging via
+`wiki::obsidian_export::write_vault` + reuse of `site_export::zip_directory`
+(temp zip + rename, cross-volume safe); emits `wiki:progress`; returns
+`ObsidianExportResult { fileCount, path, stats }`).
 
 `wiki_search` rebuilds the FTS index if empty; `wiki_update_page` /
 `wiki_delete_page` rebuild it on every edit/delete so chat + search stay in
@@ -386,6 +416,10 @@ full flag contract.
 ## Verification
 
 - `tests/wiki/wiki_fts_test.rs` (36 unit tests)
+- `tests/wiki/wiki_obsidian_export_test.rs` (Obsidian vault export: slug map,
+  aliases, frontmatter/body rewrites, vault staging incl. the whole-vault
+  no-UUID guard, orphan/collision fallbacks, zip round-trip; binding
+  inventory rows in `docs/test-plans/wiki-export-tests.md`)
 - `tests/wiki/wiki_ingest_test.rs` (6 freeze tests)
 - `tests/wiki/wiki_consolidation_test.rs` (multi-batch consolidation)
 - `tests/wiki/wiki_index_drift_test.rs` (two-tier external-edit drift detection)

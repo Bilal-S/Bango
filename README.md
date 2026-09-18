@@ -46,7 +46,7 @@ Responses will be on an availability basis (takes some time).
 | 📈 | **Bibliometric Analysis** | Six modules: co-authorship, citation, keywords, timeline, author productivity, co-citation, plus LLM cluster thematic analysis and a Google Trends panel |
 | 🔗 | **References & Citations** | Track backward references and forward citations with promotion workflow |
 | 📎 | **Full-Text Attachments** | Attach PDFs/TXT files, extract text (with CJK mojibake recovery), inline PDF reader, AI figure/table descriptions |
-| 📚 | **LLM Wiki Knowledge Base** | Obsidian-style Markdown wiki with concept hubs, author pages, methods hubs, FTS5 search, graph visualization, and static-site export. Can be opened in Obsidian for edits and enrichments. |
+| 📚 | **LLM Wiki Knowledge Base** | Obsidian-style Markdown wiki with concept hubs, author pages, methods hubs, FTS5 search, graph visualization, static-site export, and Obsidian vault export. Can be opened in Obsidian for edits and enrichments. |
 | 💬 | **Chat Assistant** | RAG-based Q&A over your articles or your wiki, plus a Citation Finder mode, with source-citation identification |
 | 🎯 | **Citation Finder** | Paste manuscript prose and find which library articles support or contradict each claim |
 | 🧠 | **Semantic Embeddings** | Automatic background vectors per article and chunk powering fast semantic recall |
@@ -440,6 +440,7 @@ The wiki lives on disk under `{storage_root}/wiki-root/` and is fully navigable 
 - **RAG chat**: token-budgeted chat over the wiki FTS5 index with section-aware citations
 - **External-edit drift detection**: detects when external programs (e.g., Obsidian) edit wiki files and re-indexes transparently without re-running the LLM
 - **Static-site export**: exports the wiki as a self-contained static website (HTML + CSS + JS + Markdown) in a `.zip` file; article references resolve to synthesis pages or metadata-only stubs (copyright-safe, no full text included)
+- **Obsidian vault export**: exports the wiki as a ready-to-open Obsidian vault `.zip` with all UUIDs pre-processed (synthesis pages renamed to author-year-title slugs, wikilinks/footnotes/frontmatter rewritten, `Home.md` index + `.obsidian/` graph color config included); reachable from the Wiki toolbar Actions menu and the global Export dialog
 - **Back/Forward navigation**: browser-style page navigation with platform-aware keyboard shortcuts (`Alt+Left`/`Alt+Right` on Windows/Linux, `Cmd+[`/`Cmd+]` on macOS)
 
 </details>

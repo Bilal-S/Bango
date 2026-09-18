@@ -52,6 +52,7 @@ const deleting = ref(false);
 const rebuilding = ref(false);
 const checkingUpdates = ref(false);
 const generatingSite = ref(false);
+const exportingObsidian = ref(false);
 const cancelling = ref(false);
 const showExportDialog = ref(false);
 const exportTitle = ref('');
@@ -403,6 +404,23 @@ function isInitialized(): boolean {
   return props.status?.initialized === true;
 }
 
+/** Export the wiki as an Obsidian-ready vault `.zip` via the native save
+ *  dialog. Single-step backend command (pre-process + stage + zip). */
+async function handleExportObsidian(): Promise<void> {
+  exportingObsidian.value = true;
+  try {
+    const { exportObsidian } = useExport();
+    const ok = await exportObsidian();
+    if (ok) {
+      toast.show('Obsidian vault exported successfully.', 'success');
+    }
+  } catch {
+    toast.show('Failed to export Obsidian vault', 'error');
+  } finally {
+    exportingObsidian.value = false;
+  }
+}
+
 /** Whether there are included articles to build a wiki from. */
 function hasIncludedArticles(): boolean {
   return (props.status?.includedArticleCount ?? 0) > 0;
@@ -614,6 +632,25 @@ function handleChat(): void {
         >
           <span class="material-symbols-outlined text-[16px] text-slate-500">public</span>
           {{ generatingSite ? 'Generating...' : 'Export Website' }}
+        </button>
+        <!-- Export to Obsidian: UUID-free vault zip (single-step) -->
+        <button
+          class="wiki-toolbar__menu-item"
+          :disabled="exportingObsidian || !isInitialized()"
+          :title="
+            isInitialized()
+              ? 'Export the wiki as an Obsidian-ready vault zip (UUID-free, ready to open in Obsidian)'
+              : 'Initialize the wiki first'
+          "
+          @click="
+            () => {
+              closeActionsMenu();
+              void handleExportObsidian();
+            }
+          "
+        >
+          <span class="material-symbols-outlined text-[16px] text-slate-500">auto_stories</span>
+          {{ exportingObsidian ? 'Exporting...' : 'Export to Obsidian' }}
         </button>
         <!-- Divider -->
         <hr class="wiki-toolbar__menu-divider" />

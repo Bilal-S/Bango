@@ -14,12 +14,14 @@
 //! - `chat.rs` - wiki_chat delegate.
 //! - `ingest.rs` - ingest / rebuild / export-and-ingest + batch builder.
 //! - `site_export.rs` - static-site generate / zip / file helpers.
+//! - `obsidian_export.rs` - Obsidian vault export (stage + zip).
 //!
 //! Public API unchanged: `bango_lib::commands::wiki_cmd::*` import paths work
 //! identically to the pre-split single-file module.
 
 mod chat;
 mod ingest;
+mod obsidian_export;
 mod pages;
 mod raw_files;
 mod search_lint;
@@ -41,6 +43,7 @@ use std::sync::Arc;
 // log_wiki_ingest_warnings) stay module-private.
 pub use chat::*;
 pub use ingest::*;
+pub use obsidian_export::*;
 pub use pages::*;
 pub use raw_files::*;
 pub use search_lint::*;

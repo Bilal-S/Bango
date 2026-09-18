@@ -8,6 +8,7 @@ pub mod engine;
 pub mod frontmatter;
 pub mod fts;
 pub mod ingest;
+pub mod obsidian_export;
 pub mod raw_export;
 pub mod storage;
 pub mod templates;

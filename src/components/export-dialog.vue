@@ -17,6 +17,7 @@ const {
   exportBibtex,
   exportRisForTab,
   exportProject,
+  exportObsidian,
   generateWikiSite,
   openWikiExport,
   downloadWikiZip,
@@ -144,6 +145,17 @@ const zoteroButtonLabel = computed(() =>
           "
         >
           Export Wiki Website
+        </button>
+        <button
+          class="btn btn--secondary"
+          :disabled="exporting"
+          @click="
+            async () => {
+              if (await exportObsidian()) emit('close');
+            }
+          "
+        >
+          Export to Obsidian
         </button>
       </div>
 

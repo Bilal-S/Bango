@@ -171,8 +171,9 @@ pub fn generate_export_inner(
     })
 }
 
-/// Recursively count files under a directory.
-fn count_files_recursive(dir: &std::path::Path) -> Result<usize, AppError> {
+/// Recursively count files under a directory. `pub(super)` so the Obsidian
+/// vault export reuses it.
+pub(super) fn count_files_recursive(dir: &std::path::Path) -> Result<usize, AppError> {
     let mut count = 0;
     count_files_inner(dir, &mut count)?;
     Ok(count)
@@ -251,7 +252,13 @@ fn copy_user_doc_markdown(
 /// its path relative to `src_dir`. Maps `zip::result::ZipError` to
 /// `AppError::Import` since `AppError` has no `From<ZipError>` impl (the error
 /// type is library-specific and does not warrant a dedicated variant).
-fn zip_directory(src_dir: &std::path::Path, zip_path: &std::path::Path) -> Result<(), AppError> {
+/// `pub` so the Obsidian vault export reuses it and the integration tests can
+/// exercise it directly without a Tauri `State<DbState>` wrapper (mirrors
+/// `generate_export_inner`).
+pub fn zip_directory(
+    src_dir: &std::path::Path,
+    zip_path: &std::path::Path,
+) -> Result<(), AppError> {
     let file = std::fs::File::create(zip_path)?;
     let mut writer = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default()

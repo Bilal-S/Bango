@@ -9,11 +9,14 @@ vi.mock('@/composables/use-tauri-command', () => ({
   tauriCommand: (...args: unknown[]) => mockTauriCommand(...args),
 }));
 
-// Mock @tauri-apps/plugin-dialog (used by Add Documents -> From Local Drive).
+// Mock @tauri-apps/plugin-dialog (used by Add Documents -> From Local Drive,
+// and by useExport's save-dialog scaffold for the Obsidian export).
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn().mockResolvedValue(null),
+  save: vi.fn().mockResolvedValue(null),
 }));
 
+import { save } from '@tauri-apps/plugin-dialog';
 import WikiToolbar from '@/components/wiki/wiki-toolbar.vue';
 
 function makeStatus(overrides: Partial<WikiStatus> = {}): WikiStatus {
@@ -155,7 +158,34 @@ describe('wiki-toolbar.vue', () => {
     expect(texts.some((t) => t.includes('Rebuild Wiki'))).toBe(true);
     expect(texts.some((t) => t.includes('Ingest'))).toBe(true);
     expect(texts.some((t) => t.includes('Health Check'))).toBe(true);
+    expect(texts.some((t) => t.includes('Export to Obsidian'))).toBe(true);
     expect(texts.some((t) => t.includes('Delete Wiki'))).toBe(true);
+  });
+
+  it('export_to_obsidian_item_invokes_save_dialog_and_command', async () => {
+    vi.mocked(save).mockResolvedValue('/tmp/bango-wiki-obsidian.zip');
+    mockTauriCommand.mockResolvedValue({ fileCount: 8, path: '/tmp/bango-wiki-obsidian.zip' });
+
+    const wrapper = mountToolbar({ status: makeStatus() });
+    const items = await openActionsMenu(wrapper);
+    const btn = items.find((i) => i.text().includes('Export to Obsidian'));
+    expect(btn).toBeTruthy();
+    await btn!.trigger('click');
+    await flushPromises();
+
+    expect(mockTauriCommand).toHaveBeenCalledWith('wiki_export_obsidian', {
+      path: '/tmp/bango-wiki-obsidian.zip',
+    });
+  });
+
+  it('export_to_obsidian_item_disabled_when_wiki_not_initialized', async () => {
+    const wrapper = mountToolbar({
+      status: makeStatus({ initialized: false }),
+    });
+    const items = await openActionsMenu(wrapper);
+    const btn = items.find((i) => i.text().includes('Export to Obsidian'));
+    expect(btn).toBeTruthy();
+    expect(btn!.attributes('disabled')).toBeDefined();
   });
 
   it('Actions menu shows Initialize Wiki (not Rebuild) when not initialized', async () => {

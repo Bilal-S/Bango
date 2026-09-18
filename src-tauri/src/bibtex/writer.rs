@@ -57,17 +57,27 @@ fn sanitize_key_fragment(text: &str) -> String {
 /// guarantees a non-empty key.
 #[must_use]
 pub fn make_citation_key(article: &RisExportArticle) -> String {
-    let surname = sanitize_key_fragment(&first_author_surname(&article.authors));
+    citation_key_from_parts(&article.authors, article.publication_year, &article.title)
+}
+
+/// Citation key from raw parts: `{surname}{year}{title-word}`. Shared by the
+/// BibTeX writer and the Obsidian vault export's article page slugs so both
+/// surfaces use one key convention. Same `anon`/`nd` fallbacks as
+/// `make_citation_key`.
+#[must_use]
+pub fn citation_key_from_parts(authors: &[String], year: Option<i32>, title: &str) -> String {
+    let surname = sanitize_key_fragment(&first_author_surname(authors));
     let surname = if surname.is_empty() { "anon".to_string() } else { surname };
-    let year = article.publication_year.map_or_else(|| "nd".to_string(), |y| y.to_string());
-    let title_word = first_significant_title_word(&article.title);
+    let year = year.map_or_else(|| "nd".to_string(), |y| y.to_string());
+    let title_word = first_significant_title_word(title);
     format!("{surname}{year}{title_word}")
 }
 
 /// Assign unique keys across one file: the second occurrence of a key appends
 /// `b`, the third `c`, and so on (BibTeX letter-suffix convention, capped at
-/// `z` - beyond 26 collisions per key the suffix stays `z`).
-fn dedupe_keys(keys: &[String]) -> Vec<String> {
+/// `z` - beyond 26 collisions per key the suffix stays `z`). `pub` so the
+/// Obsidian vault export can dedupe its article slugs with the same rule.
+pub fn dedupe_keys(keys: &[String]) -> Vec<String> {
     let mut counts: HashMap<&str, u32> = HashMap::new();
     keys.iter()
         .map(|key| {

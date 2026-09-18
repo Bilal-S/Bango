@@ -25,6 +25,9 @@ const RIS_FILTERS = [{ name: 'RIS File', extensions: ['ris'] }];
 /** Shared save-dialog filter set for BibTeX exports. */
 const BIBTEX_FILTERS = [{ name: 'BibTeX File', extensions: ['bib'] }];
 
+/** Shared save-dialog filter set for the Obsidian vault zip export. */
+const OBSIDIAN_ZIP_FILTERS = [{ name: 'Zip Archive', extensions: ['zip'] }];
+
 export function useExport() {
   const exporting = ref(false);
   const error = ref<string | null>(null);
@@ -115,6 +118,12 @@ export function useExport() {
       { name: 'Bango Backup', extensions: ['bango.json'] },
       { name: 'JSON', extensions: ['json'] },
     ]);
+  }
+
+  /** Export the wiki as an Obsidian-ready vault `.zip` (single-step command:
+   *  the backend pre-processes UUIDs away, stages, and zips in one call). */
+  function exportObsidian(): Promise<boolean> {
+    return runExport('wiki_export_obsidian', {}, 'bango-wiki-obsidian.zip', OBSIDIAN_ZIP_FILTERS);
   }
 
   async function importProject(file: File): Promise<boolean> {
@@ -235,6 +244,7 @@ export function useExport() {
     exportRisForTab,
     exportRisForIds,
     exportProject,
+    exportObsidian,
     importProject,
     resetProject,
     generateWikiSite,

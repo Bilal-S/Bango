@@ -2136,6 +2136,34 @@ ER  - </pre>
               material, or archive your review for posterity.
             </p>
 
+            <h3>Export Wiki to Obsidian</h3>
+            <p>
+              The <strong>Export to Obsidian</strong> option (Wiki toolbar
+              <strong>Actions</strong> menu, or the global Export menu in the article list) packages
+              your wiki as a ready-to-open
+              <a href="https://obsidian.md" target="_blank" rel="noopener noreferrer">Obsidian</a>
+              vault <code>.zip</code>:
+            </p>
+            <ul>
+              <li>
+                Article (synthesis) pages are renamed to readable
+                <code>author-year-title</code> slugs - no UUIDs anywhere in the vault.
+              </li>
+              <li>
+                Wikilinks, footnotes, and frontmatter references are rewritten to the new names, so
+                navigation and the graph view work immediately after extracting.
+              </li>
+              <li>
+                Includes a generated <code>Home.md</code> index and a minimal
+                <code>.obsidian/</code> config with graph color groups matching the app's page-type
+                colors.
+              </li>
+              <li>
+                Extract the zip anywhere and open the folder as an Obsidian vault (File &rarr; Open
+                folder as vault). Raw article text is never included - copyright safe.
+              </li>
+            </ul>
+
             <h3>Hosting Your Wiki Online</h3>
             <p>
               The exported wiki is a folder of static HTML files. You can host it for free on any

@@ -331,6 +331,7 @@ pub fn run() {
             commands::wiki_cmd::wiki_check_for_updates,
             commands::wiki_cmd::wiki_generate_export,
             commands::wiki_cmd::wiki_zip_export,
+            commands::wiki_cmd::wiki_export_obsidian,
             commands::wiki_cmd::cancel_wiki_ingest,
             commands::openalex::search_openalex,
             commands::openalex::import_openalex_articles,

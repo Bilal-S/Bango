@@ -95,4 +95,32 @@ describe('useExport - RIS export scaffold (refactor1 Tier 0)', () => {
     expect(result).toBe(false);
     expect(error.value).toBe('BibTeX export failed');
   });
+
+  it('export_obsidian_invokes_wiki_command_with_zip_filter', async () => {
+    vi.mocked(save).mockResolvedValue('/tmp/bango-wiki-obsidian.zip');
+
+    const { exportObsidian } = useExport();
+    const result = await exportObsidian();
+
+    expect(result).toBe(true);
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultPath: 'bango-wiki-obsidian.zip',
+        filters: [{ name: 'Zip Archive', extensions: ['zip'] }],
+      })
+    );
+    expect(tauriCommand).toHaveBeenCalledWith('wiki_export_obsidian', {
+      path: '/tmp/bango-wiki-obsidian.zip',
+    });
+  });
+
+  it('export_obsidian_returns_false_when_dialog_cancelled', async () => {
+    vi.mocked(save).mockResolvedValue(null);
+
+    const { exportObsidian } = useExport();
+    const result = await exportObsidian();
+
+    expect(result).toBe(false);
+    expect(tauriCommand).not.toHaveBeenCalled();
+  });
 });
