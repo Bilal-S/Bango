@@ -13,6 +13,7 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde::Serialize;
 use tauri::{Emitter, State};
@@ -177,22 +178,45 @@ pub fn get_embedding_backend(db_state: State<'_, DbState>) -> Result<String, App
 /// Set the embedding backend selection. The capability triple resets to
 /// `unknown` so the next probe (offline for local, HTTP for cloud)
 /// re-evaluates under the new backend - selection never implies readiness.
+///
+/// Async by necessity (app-freeze regression): a plain sync command runs on
+/// the main thread, and the old body held the DB lock across the engine
+/// session reset - with a local embed batch in flight the whole app froze
+/// until the batch released the session mutex. The DB writes stay in a
+/// brief burst, the guard drops BEFORE the engine wait, and the session
+/// teardown runs off-thread (`LocalEngine::reset_off_thread`).
 #[tauri::command]
-pub fn set_embedding_backend(
+pub async fn set_embedding_backend(
     db_state: State<'_, DbState>,
     engine: State<'_, Arc<LocalEngine>>,
     backend: String,
 ) -> Result<String, AppError> {
+    let started = Instant::now();
+    eprintln!("[embedding] set_embedding_backend begin: '{backend}'");
     let parsed = EmbeddingBackend::parse_exact(&backend)
         .ok_or_else(|| AppError::Validation(format!("unknown embedding backend: '{backend}'")))?;
-    let conn = lock_conn(&db_state.conn)?;
-    app_settings_repo::set_embedding_backend(&conn, parsed)?;
-    app_settings_repo::reset_embedding_status(&conn)?;
+    {
+        // Brief DB burst ONLY (lock discipline): persist the selection and
+        // reset the triple, then release the guard before the engine wait.
+        let conn = lock_conn(&db_state.conn)?;
+        app_settings_repo::set_embedding_backend(&conn, parsed)?;
+        app_settings_repo::reset_embedding_status(&conn)?;
+    }
+    eprintln!(
+        "[embedding] set_embedding_backend persisted '{}', resetting engine",
+        parsed.as_str()
+    );
     // L8 (findings-7, partial): drop any loaded local session on a switch so
     // the on-device footprint does not outlive the selection (an idle-time
     // unload stays out of scope; the ORT env/DLL remain process-resident by
-    // design - see embedding/AGENTS.md).
-    engine.reset();
+    // design - see embedding/AGENTS.md). Off-thread: never block the main
+    // thread and never run ORT teardown inside a DB-lock scope.
+    engine.reset_off_thread().await?;
+    eprintln!(
+        "[embedding] set_embedding_backend done: '{}' in {} ms",
+        parsed.as_str(),
+        started.elapsed().as_millis()
+    );
     Ok(parsed.as_str().to_string())
 }
 
@@ -343,10 +367,11 @@ pub async fn install_local_embeddings(
         report.bytes_downloaded += runtime_report.bytes_downloaded;
     }
 
-    // Step 3 (plan §5 self-test): drop any stale session, then load fresh
-    // and embed a probe. A failure surfaces as an install error (components
-    // stay on disk; the status command will show repair_required).
-    engine.reset();
+    // Step 3 (plan §5 self-test): drop any stale session (off-thread - ORT
+    // teardown must not block the caller), then load fresh and embed a
+    // probe. A failure surfaces as an install error (components stay on
+    // disk; the status command will show repair_required).
+    engine.reset_off_thread().await?;
     let engine_paths = EnginePaths {
         model_root: paths.model_root.clone(),
         runtime_root: paths.runtime_root.clone(),
@@ -492,8 +517,9 @@ pub async fn remove_local_embeddings(
         }
         root
     };
-    // Drop any loaded session so the library file is not held open.
-    engine.reset();
+    // Drop any loaded session so the library file is not held open
+    // (off-thread; awaited so the handles release before deletion).
+    engine.reset_off_thread().await?;
     let paths = resolve_ai_paths(Path::new(&storage_root));
     // Sweep EVERY candidate root: the resolved one, the app-data fallback,
     // and ALWAYS `{storage_root}/model` - a pre-move install is orphaned

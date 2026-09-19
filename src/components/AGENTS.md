@@ -223,9 +223,13 @@ events with overall % + Cancel; repair banner for `repair_required` OR a
 missing runtime (`runtimeReady` false); Component Details (expandable:
 profile, model + 768 dims, ONNX Runtime version + CPU thread budget,
 installed size [computed whenever the profile dir exists], resolved paths,
-OneDrive-fallback note) with Verify Installation + two-step Remove; privacy
-table scoped to the embedding operation; state via `useLocalEmbeddings()`,
-see `composables/AGENTS.md`),
+OneDrive-fallback note) with Verify Installation + two-step Remove;
+description is one non-technical sentence + `Learn more` link to Help
+Reference `#ref-embeddings` (`.settings-card__learn-more` chrome lives in
+`settings-card-shared.css`; the processing-location explanation lives in
+the Help Reference `Embeddings` section below `Backup & Restore`, not in
+the card); state via `useLocalEmbeddings()`, see
+`composables/AGENTS.md`),
 `settings-screening-preferences.vue`, `settings-storage.vue`,
 `settings-reprocessing.vue` (owns the chunk-rebuild progress widget: live
 `chunk-rebuild:progress` bar with phase label, percent, counts + translated

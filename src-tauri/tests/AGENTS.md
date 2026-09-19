@@ -16,6 +16,12 @@ files compact; helpers tested externally are `pub`).
   (indexed in the root `AGENTS.md` Child DOX Index).
 - PDF test assets live in `tests/assets/` (repo root, referenced via
   `../tests/assets/...` relative to the `src-tauri` package cwd).
+- `tests/assets/pone-0285956-chunks.json` is the committed chunk fixture the
+  local-embeddings app-install live test embeds; regenerate it from the PDF
+  with `cargo test --test embedding generate_pone_chunks_fixture -- --ignored`.
+  It inherits the known multi-column extraction garbling documented under Work
+  Guidance below - it is a representative embedding/timing sample, not ground
+  truth for section classification.
 
 ## Local Contracts
 

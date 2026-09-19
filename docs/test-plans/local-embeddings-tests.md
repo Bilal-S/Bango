@@ -88,9 +88,12 @@ or explicitly with `-- --ignored` plus their documented env-var artifacts.
 | `src-tauri/src/embedding/local/engine.rs::engine_validate_vectors_rejects_wrong_count_and_dims` | Wrong vector count + wrong dimensions rejected |
 | `src-tauri/src/embedding/local/engine.rs::engine_resolve_dylib_env_override_wins` | `ORT_DYLIB_PATH` override wins; whitespace-only override is ignored |
 | `src-tauri/src/embedding/local/engine.rs::engine_resolve_dylib_requires_healthy_install` | Missing/truncated runtime -> actionable error; pinned-size library resolves |
+| `src-tauri/src/embedding/local/engine.rs::engine_reset_off_thread_without_a_session_is_a_noop` | Empty-session off-thread reset is a fast Ok; no session appears |
 | `src-tauri/tests/embedding/embedding_runner_test.rs::sender_local_backend_routes_to_engine_gate` | Local sender refuses an uninstalled profile (no cloud fallback, no HTTP) |
 | `src-tauri/tests/embedding/embedding_runner_test.rs::sender_local_probe_reports_not_installed_without_cloud_call` | Offline probe reports actionable disabled without touching the cloud |
 | `src-tauri/tests/embedding/embedding_runner_test.rs::sender_provider_id_labels_backend` | Rows label `Openai` (cloud) vs `bango_local` (local) |
+| `src-tauri/tests/embedding/embedding_runner_test.rs::sender_cloud_probe_without_config_reports_llm_not_configured` | Production sender's `ConfiguredProvider` probe returns the default disabled outcome (regression: the override called the trait method on `self`, self-recursing into a stack-overflow SIGSEGV) |
+| `src-tauri/tests/embedding/embedding_runner_test.rs::sender_cloud_probe_delegates_to_the_http_probe` | Cloud probe reaches the shared HTTP probe body (Anthropic short-circuit outcome) instead of re-entering the override |
 | `src-tauri/tests/embedding/embedding_backend_setting_test.rs::backend_parse_exact_is_strict_for_command_arguments` | Strict command-boundary parse rejects garbage (vs the forgiving DB read) + round-trips both values |
 
 ## T6 - Settings UI
@@ -118,6 +121,8 @@ or explicitly with `-- --ignored` plus their documented env-var artifacts.
 | `src/__tests__/components/settings-embeddings.test.ts::shows_the_repair_banner_when_the_runtime_is_missing` | Missing runtime surfaces the repair banner |
 | `src/__tests__/components/settings-embeddings.test.ts::manual_download_routes_through_consent_when_cloud_selected` | L4: the card's Download opens consent (Gemma terms) when cloud is selected; nothing installs before confirm |
 | `src/__tests__/components/settings-embeddings.test.ts::manual_download_installs_directly_when_local_selected` | With local selected (consent already given) the Download installs directly |
+| `src/__tests__/components/settings-embeddings.test.ts::card_describes_what_embeddings_do_and_links_to_the_help_section` | The card description is one non-technical sentence + a Learn-more link routing to `/help?tab=reference#ref-embeddings`; the in-card privacy table is gone |
+| `src/__tests__/components/settings-embeddings.test.ts::radios_disable_while_a_backend_switch_is_in_flight` | The provider radios disable while `selectBackend` persists (no double-fire during the off-thread session reset) |
 | `src/__tests__/components/citation-local-embeddings-dialog.test.ts::hides_use_configured_provider_when_the_chat_provider_cannot_embed` | The option hides with an explanation for providers without embedding APIs; the license line shows regardless |
 | `src-tauri/tests/citation_finder/citation_finder_readiness_test.rs::compute_readiness_bango_local_ready_passes_gate_despite_stale_disabled` | The local Phase A gate tracks actual readiness, not the persisted disabled triple |
 | `src-tauri/tests/embedding/embedding_component_test.rs::runtime_extract_zip_matches_dot_prefixed_members` | Zip `./`-prefix parity with the tar member matching |
@@ -136,3 +141,11 @@ or explicitly with `-- --ignored` plus their documented env-var artifacts.
 |---|---|
 | `src-tauri/tests/embedding/embedding_engine_live_test.rs::live_embeddinggemma_q4_end_to_end` | Live: pins verify, pinned runtime archive installs + engine embeds without `ORT_DYLIB_PATH`, direct Q4 load via ort load-dynamic, 768-dim role-prefixed output, retrieval sanity (`BANGO_EMBED_MODEL_DIR` required - the runtime archive downloads itself) |
 | `src-tauri/tests/embedding/embedding_engine_live_test.rs::embeddinggemma_q4_acceptance_smoke` | T8 acceptance smoke (self-sufficient, network): installs BOTH pinned components, verifies, embeds a 200-doc corpus via `LocalEngine`, 768-dim + count + retrieval-sanity asserts, and prints install/cold-call/throughput/warm-latency/peak-RSS observations (RAM lower-bound assert on linux) |
+
+## Operational app-install check (ignored; no network)
+
+| Test | Assertion |
+|---|---|
+| `src-tauri/tests/embedding/embedding_engine_live_test.rs::live_embed_chunk_fixture_against_installed_app` | Embeds the committed `pone-0285956` chunk fixture through the components the APP downloaded (storage root from `BANGO_STORAGE_ROOT` / the app DB read-only / the platform default; no network, no `ORT_DYLIB_PATH`): asserts install Ready + offline probe enabled/768/`LOCAL_PROFILE_ID`, per-chunk 1x768 finite vectors, and prints the time each chunk embedding takes plus a min/mean/max/total summary |
+| `src-tauri/tests/embedding/embedding_engine_live_test.rs::local_engine_reset_off_thread_after_probe` | Live backend-switch freeze regression: probe loads the session, `reset_off_thread` drops it without blocking the caller, the next probe lazy-reloads enabled (app install required) |
+| `src-tauri/tests/embedding/embedding_engine_live_test.rs::generate_pone_chunks_fixture` | Plain-`#[ignore]` fixture generator: rewrites `tests/assets/pone-0285956-chunks.json` from the committed PLOS ONE PDF via `utils::sections::extract_sections` + `utils::chunking::chunk_sections(DEFAULT_CHUNK_WORDS)` |

@@ -88,3 +88,35 @@ describe('help-tab-reference.vue - Articles, OpenAlex Search, References Tab sec
     expect(openalexBtn!.classes()).toContain('ref-nav__link--active');
   });
 });
+
+describe('help-tab-reference.vue - Embeddings section', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('renders the Embeddings section with its title', () => {
+    const wrapper = mountReference();
+    const titles = wrapper.findAll('.ref-section__title').map((t) => t.text());
+    expect(titles).toContain('Embeddings');
+  });
+
+  it('places Embeddings below Backup & Restore in content and nav', () => {
+    const wrapper = mountReference();
+    const ids = wrapper.findAll('section.ref-section').map((s) => s.attributes('id'));
+    expect(ids).toContain('ref-embeddings');
+    expect(ids.indexOf('ref-backup')).toBeGreaterThan(-1);
+    expect(ids.indexOf('ref-backup')).toBeLessThan(ids.indexOf('ref-embeddings'));
+    expect(navIndex(wrapper, 'Backup & Restore')).toBeLessThan(navIndex(wrapper, 'Embeddings'));
+  });
+
+  it('explains the two providers and processing locations in non-technical terms', () => {
+    const wrapper = mountReference();
+    const text = wrapper.find('#ref-embeddings').text();
+    expect(text).toContain('Configured Provider');
+    expect(text).toContain('Bango Local');
+    expect(text).toContain('How Bango Decides');
+    expect(text).toContain('Where Your Text Is Processed');
+    // Scope note carried over from the removed in-card privacy table.
+    expect(text).toContain('the embedding step only');
+  });
+});

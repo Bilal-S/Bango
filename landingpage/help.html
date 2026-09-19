@@ -3861,6 +3861,18 @@
                 "
                 >Backup & Restore</a
               >
+              <a
+                href="#ref-embeddings"
+                style="
+                  font-size: 0.75rem;
+                  padding: 0.25rem 0.625rem;
+                  border-radius: 9999px;
+                  background: #eef2ff;
+                  color: #4f46e5;
+                  text-decoration: none;
+                "
+                >Embeddings</a
+              >
             </nav>
 
             <div id="ref-content">
@@ -5853,6 +5865,95 @@ ER  - </pre
                     </li>
                     <li>The journal index and app settings are preserved.</li>
                   </ul>
+                </div>
+              </section>
+
+              <!-- Embeddings -->
+              <section class="ref-section" id="ref-embeddings">
+                <header class="ref-section__header">
+                  <span class="material-symbols-outlined ref-section__icon">blur_on</span>
+                  <h2 class="ref-section__title">Embeddings</h2>
+                </header>
+                <div class="ref-section__body">
+                  <p>
+                    Embeddings are the technology behind Bango's meaning-based search. When Bango
+                    reads an article, it also creates a compact numerical fingerprint of what the
+                    text means. Because fingerprints capture meaning rather than exact wording,
+                    Bango can find a paper about a "levy on sugar-sweetened beverages" even when
+                    you search for "sugary drink tax".
+                  </p>
+                  <p>
+                    These fingerprints power semantic article search and the Citation Finder. Bango
+                    builds them automatically in the background the first time they are needed, so
+                    the first search on a new corpus may take several minutes to prepare them.
+                  </p>
+
+                  <h3>Where Fingerprints Are Created</h3>
+                  <ul>
+                    <li>
+                      <strong>Configured Provider (default):</strong> Bango sends article text to
+                      the embedding API of the AI provider configured in Settings. This requires a
+                      provider that offers embeddings and an active connection; usage is billed by
+                      your provider like any other API call.
+                    </li>
+                    <li>
+                      <strong>Bango Local:</strong> Bango downloads a small model (EmbeddingGemma
+                      300M, roughly 220-300 MB) once, then computes the fingerprints entirely on
+                      your computer. After the download it needs no internet, adds no per-use cost,
+                      and your paper text never leaves the device for embedding. It is not
+                      available on every computer (for example, older Intel Macs).
+                    </li>
+                  </ul>
+                  <p>
+                    You can switch between the two at any time in Settings &rarr; Embeddings. The
+                    choice applies to this device; switching never changes or deletes your
+                    articles.
+                  </p>
+
+                  <h3>How Bango Decides</h3>
+                  <ul>
+                    <li>
+                      <strong>Configured Provider:</strong> Bango checks whether your provider
+                      supports embeddings when you run Test Connection or start your first search.
+                      Providers without an embedding API (Anthropic, Z.AI) leave the semantic
+                      features unavailable, with a banner pointing you to Settings.
+                    </li>
+                    <li>
+                      <strong>Bango Local:</strong> selecting it the first time shows a consent
+                      dialog (what runs locally, the download size, and the Gemma license terms)
+                      before anything is downloaded. Bango verifies the download and self-tests the
+                      model before reporting success. If a search starts without the local
+                      components, Bango offers to download them and continue, use the configured
+                      provider instead, or cancel. On unsupported machines it falls back to the
+                      configured provider.
+                    </li>
+                    <li>
+                      <strong>Switching models:</strong> fingerprints remember the model that
+                      created them. If you change provider, model, or backend, Bango detects the
+                      mismatch and offers to regenerate the fingerprints (or continue with partial
+                      recall).
+                    </li>
+                  </ul>
+
+                  <h3>Where Your Text Is Processed</h3>
+                  <p>
+                    With Configured Provider, the embedding step happens on your provider's
+                    servers: the text is sent over the internet, and the resulting fingerprints are
+                    stored in your local project database. With Bango Local, both the model and the
+                    processing stay on your computer.
+                  </p>
+                  <p>
+                    This describes the embedding step only. Other AI features such as summaries,
+                    screening, and chat continue to use your configured provider under their own
+                    settings.
+                  </p>
+
+                  <h3>Manage in Settings</h3>
+                  <p>
+                    You can switch backends and download, verify, repair, or remove the local
+                    components from Settings &rarr; Embeddings. Removing the local components only
+                    deletes the downloaded model files; your articles stay untouched.
+                  </p>
                 </div>
               </section>
             </div>

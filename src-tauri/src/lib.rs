@@ -48,6 +48,12 @@ pub struct AppFlags {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Install a panic hook so crashes on ANY thread land in the dev stderr
+    // log with a backtrace (the default hook omits it under load).
+    std::panic::set_hook(Box::new(|info| {
+        eprintln!("[panic] {info}");
+        eprintln!("[panic] backtrace:\n{}", std::backtrace::Backtrace::force_capture());
+    }));
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

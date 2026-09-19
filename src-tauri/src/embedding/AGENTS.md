@@ -103,8 +103,15 @@ fastembed `TextEmbedding` session behind `Arc<Mutex<Option<EngineSession>>>`:
   environment commits exactly once via `init_from` (under load-dynamic
   `commit()` returns a success bool); a failed commit is terminal for the
   process lifetime (repair = app restart).
-- `engine.reset()` drops the session (install command resets before the
-  self-test; remove resets before deleting files so the library is not held).
+- `engine.reset_off_thread()` drops the session: `take()` under the brief
+  lock, ORT teardown inside `spawn_blocking` (install resets before the
+  self-test; remove resets before deleting files so the library is not held;
+  the backend-switch command resets after persisting the selection). NEVER
+  drop the session inline under the lock: the old sync `reset()` called from
+  the then-synchronous `set_embedding_backend` froze the whole app (main
+  thread + held DB mutex waiting out an in-flight embed batch, then ORT
+  teardown on the main thread). Regression test:
+  `embedding_engine_live_test::local_engine_reset_off_thread_after_probe`.
 
 ### Component manager (`local/manifest.rs` + `local/download.rs` + `commands/local_embeddings.rs`)
 
@@ -266,26 +273,38 @@ backend-aware sender via `runner::backend_sender(app_handle)`.
   extraction, traversal rejection, integrity-aware runtime skip, runtime
   size-mismatch repair + staging cleanup, dot-prefixed macOS member
   matching, runtime verify missing/corrupt/healthy)
-- `tests/embedding/embedding_engine_live_test.rs` (2, both `#[ignore =
-  "slow"]`): the T4/T5 live spike (pin verification, pinned runtime archive
+- `tests/embedding/embedding_engine_live_test.rs` (3 `#[ignore = "slow"]`
+  live tests + 1 plain-`#[ignore]` fixture generator): the T4/T5 live spike
+  (pin verification, pinned runtime archive
   install + `LocalEngine.embed` with NO dylib override, direct Q4 inference
   via ort load-dynamic; requires only `BANGO_EMBED_MODEL_DIR` - the runtime
-  downloads itself) and the T8 acceptance smoke `embeddinggemma_q4_
+  downloads itself), the T8 acceptance smoke `embeddinggemma_q4_
   acceptance_smoke` (self-sufficient, network: installs BOTH pinned
   components, verifies, embeds a 200-doc corpus via the production engine,
   asserts 768-dim + count + retrieval sanity, prints install/cold-call/
   throughput/warm-latency/peak-RSS observations; linux asserts a RAM lower
-  bound)
+  bound), and the operational app-install check
+  `live_embed_chunk_fixture_against_installed_app` (no network: storage root
+  from `BANGO_STORAGE_ROOT` / the app DB read-only / the platform default,
+  asserts install Ready + offline probe, embeds the committed
+  `tests/assets/pone-0285956-chunks.json` one chunk per call through the
+  production engine with no dylib override, prints per-chunk ms + summary).
+  `generate_pone_chunks_fixture` regenerates that fixture from the committed
+  PDF via the production `extract_sections` + `chunk_sections` pipeline
 - `tests/embedding/embedding_model_mismatch_test.rs` (11)
 - `tests/embedding/embedding_model_override_test.rs` (6)
 - `tests/embedding/embedding_recall_test.rs` (7, incl. the `f32::NEG_INFINITY`
   max-pool sentinel regression test)
 - `tests/embedding/embedding_recall_multistatus_test.rs` (12)
-- `tests/embedding/embedding_runner_test.rs` (12, covering the pure
+- `tests/embedding/embedding_runner_test.rs` (14, covering the pure
   `resolve_effective_dim` + `vector_matches_dim` helpers that drive the
   runner's per-row dimension validation, plus `BackendEmbeddingBatchSender`
   routing: local gate refusal without HTTP, offline probe outcome, provider
-  labels)
+  labels, and the cloud-probe recursion regression - the override used to
+  call the trait method on `self`, which resolves back to the override and
+  exhausts the stack (SIGSEGV) on every configured-provider probe through
+  the production sender; the shared `probe_capability_via_http` free
+  function now carries the default body)
 - `tests/embedding/embedding_probe_persist_test.rs` (13, covering the Test Connection
   probe dimension-forwarding contract + the `save_llm_config`
   conditional-reset contract - `embedding_relevant_changed` - which ensures a
@@ -301,7 +320,8 @@ backend-aware sender via `runner::backend_sender(app_handle)`.
   `download.rs` (2), `engine.rs` (4: vector validation
   accept/reject, dylib env-override + install-integrity resolution))
 
-204 tests total (202 excluding the two `#[ignore = "slow"]` live tests).
+208 tests total (205 excluding the three `#[ignore = "slow"]` live tests; the
+PDF chunk fixture generator is also `#[ignore]`d, so it runs only on demand).
 
 ## Child DOX Index
 

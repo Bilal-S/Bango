@@ -353,32 +353,8 @@ async function doDeleteProject(): Promise<void> {
   margin-top: 0.5rem;
 }
 
-/* Inline "Learn more" text-link button - opens the Help Reference Backup &
-   Restore section. Ghost style: no border, indigo text + icon, underlines on
-   hover so it reads as a link, not a button. */
-.settings-card__learn-more {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  background: transparent;
-  border: none;
-  padding: 0;
-  color: #4f46e5;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  text-decoration: none;
-  font-family: inherit;
-  transition: text-decoration 0.15s;
-}
-
-.settings-card__learn-more:hover {
-  text-decoration: underline;
-}
-
-.settings-card__learn-more .material-symbols-outlined {
-  font-size: 16px;
-}
+/* `.settings-card__learn-more` moved to settings-card-shared.css (shared
+   with the Embeddings card's description link). */
 
 .settings-card__error-banner {
   margin-top: 1rem;

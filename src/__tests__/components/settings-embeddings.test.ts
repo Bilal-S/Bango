@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
+import { createRouter, createMemoryHistory } from 'vue-router';
 
 // Mock the composable so the component's branch logic (consent gating,
 // repair banner, install actions) is testable without IPC. The factory
@@ -64,13 +65,23 @@ function api(): {
 } {
   return mock.api as ReturnType<typeof api>;
 }
+/** Fresh memory router so the Learn-more link navigation is assertable. */
+function makeRouter() {
+  return createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', component: { template: '<div/>' } },
+      { path: '/help', component: { template: '<div/>' } },
+    ],
+  });
+}
 
-async function mountCard() {
+async function mountCard(router = makeRouter()) {
   const wrapper = mount(SettingsEmbeddings, {
-    global: { stubs: { teleports: true } },
+    global: { plugins: [router], stubs: { teleports: true } },
   });
   await flushPromises();
-  return wrapper;
+  return { wrapper, router };
 }
 
 beforeEach(() => {
@@ -84,7 +95,7 @@ beforeEach(() => {
 
 describe('settings-embeddings consent gating', () => {
   it('selecting_bango_local_when_not_ready_opens_consent_without_persisting', async () => {
-    const wrapper = await mountCard();
+    const { wrapper } = await mountCard();
     expect(wrapper.findComponent({ name: 'EmbeddingsConsentDialog' }).exists()).toBe(false);
 
     const localRadio = wrapper
@@ -98,7 +109,7 @@ describe('settings-embeddings consent gating', () => {
   });
 
   it('consent_cancel_closes_the_dialog_and_keeps_the_cloud_selection', async () => {
-    const wrapper = await mountCard();
+    const { wrapper } = await mountCard();
     const localRadio = wrapper
       .findAll('input[type="radio"]')
       .find((r) => (r.element as HTMLInputElement).value === 'bango_local')!;
@@ -114,7 +125,7 @@ describe('settings-embeddings consent gating', () => {
   });
 
   it('consent_confirm_selects_the_backend_then_installs', async () => {
-    const wrapper = await mountCard();
+    const { wrapper } = await mountCard();
     const localRadio = wrapper
       .findAll('input[type="radio"]')
       .find((r) => (r.element as HTMLInputElement).value === 'bango_local')!;
@@ -130,7 +141,7 @@ describe('settings-embeddings consent gating', () => {
 
   it('selecting_bango_local_when_ready_persists_without_the_dialog', async () => {
     api().status.value = { ...NOT_INSTALLED, state: 'ready', runtimeReady: true };
-    const wrapper = await mountCard();
+    const { wrapper } = await mountCard();
 
     const localRadio = wrapper
       .findAll('input[type="radio"]')
@@ -143,7 +154,7 @@ describe('settings-embeddings consent gating', () => {
 
   it('shows_the_repair_banner_when_the_runtime_is_missing', async () => {
     api().status.value = { ...NOT_INSTALLED, state: 'ready', runtimeReady: false };
-    const wrapper = await mountCard();
+    const { wrapper } = await mountCard();
     expect(wrapper.text()).toContain('ONNX Runtime engine library is missing or damaged');
   });
 
@@ -151,7 +162,7 @@ describe('settings-embeddings consent gating', () => {
     // L4 (findings-7): with the cloud backend selected, the card's Download
     // button must open the consent dialog (Gemma terms precede ANY first
     // download) instead of installing directly.
-    const wrapper = await mountCard();
+    const { wrapper } = await mountCard();
     const download = wrapper.findAll('button').find((b) => b.text().includes('Download'))!;
     await download.trigger('click');
 
@@ -168,11 +179,51 @@ describe('settings-embeddings consent gating', () => {
 
   it('manual_download_installs_directly_when_local_selected', async () => {
     api().backend.value = 'bango_local';
-    const wrapper = await mountCard();
+    const { wrapper } = await mountCard();
     const download = wrapper.findAll('button').find((b) => b.text().includes('Download'))!;
     await download.trigger('click');
 
     expect(wrapper.findComponent({ name: 'EmbeddingsConsentDialog' }).exists()).toBe(false);
     expect(api().install).toHaveBeenCalledTimes(1);
+  });
+
+  it('card_describes_what_embeddings_do_and_links_to_the_help_section', async () => {
+    const { wrapper, router } = await mountCard();
+    const desc = wrapper.find('.settings-card__desc');
+    expect(desc.text()).toContain('by meaning instead of exact keywords');
+    expect(desc.text()).toContain('Citation Finder');
+    // The in-card privacy table is gone; the explanation lives in the Help section.
+    expect(wrapper.find('.emb-privacy').exists()).toBe(false);
+    const learnMore = wrapper.find('.settings-card__learn-more');
+    expect(learnMore.exists()).toBe(true);
+    const pushSpy = vi.spyOn(router, 'push');
+    await learnMore.trigger('click');
+    expect(pushSpy).toHaveBeenCalledWith('/help?tab=reference#ref-embeddings');
+  });
+
+  it('radios_disable_while_a_backend_switch_is_in_flight', async () => {
+    // Start from a ready LOCAL selection so the cloud radio is unchecked -
+    // VTU fires no change event when a radio is already checked.
+    api().backend.value = 'bango_local';
+    api().status.value = { ...NOT_INSTALLED, state: 'ready', runtimeReady: true };
+    const { wrapper } = await mountCard();
+    const fieldset = () => wrapper.find('fieldset.emb-options');
+    expect((fieldset().element as HTMLFieldSetElement).disabled).toBe(false);
+
+    // Hold the switch open; the radios must disable until it settles.
+    let resolveSelect!: () => void;
+    api().selectBackend.mockImplementation(
+      () => new Promise<void>((resolve) => (resolveSelect = resolve))
+    );
+    const cloudRadio = wrapper
+      .findAll('input[type="radio"]')
+      .find((r) => (r.element as HTMLInputElement).value === 'configured_provider')!;
+    await cloudRadio.setValue();
+    await flushPromises();
+    expect((fieldset().element as HTMLFieldSetElement).disabled).toBe(true);
+
+    resolveSelect();
+    await flushPromises();
+    expect((fieldset().element as HTMLFieldSetElement).disabled).toBe(false);
   });
 });

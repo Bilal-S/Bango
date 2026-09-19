@@ -16,7 +16,9 @@
 //! process-global environment is committed exactly once via `init_from`.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 
 use fastembed::{InitOptionsUserDefined, TextEmbedding, TokenizerFiles, UserDefinedEmbeddingModel};
 
@@ -65,6 +67,17 @@ struct EngineSession {
 #[derive(Default)]
 pub struct LocalEngine {
     session: Arc<Mutex<Option<EngineSession>>>,
+    /// Live `embed` calls, logged at reset to expose switch-vs-embed races.
+    embeds_in_flight: Arc<AtomicUsize>,
+}
+
+/// Decrements the in-flight embed counter on every exit path (error/panic).
+struct InFlight<'a>(&'a AtomicUsize);
+
+impl Drop for InFlight<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl LocalEngine {
@@ -86,29 +99,80 @@ impl LocalEngine {
             return Err(AppError::Validation("no texts to embed".to_string()));
         }
         let session = Arc::clone(&self.session);
+        let in_flight = Arc::clone(&self.embeds_in_flight);
         let paths = paths.clone();
         let texts = texts.to_vec();
         tokio::task::spawn_blocking(move || -> Result<(Vec<Vec<f32>>, i32), AppError> {
-            let mut guard = session
-                .lock()
-                .map_err(|e| AppError::LockPoisoned(format!("local engine session: {e}")))?;
-            if guard.is_none() {
-                *guard = Some(load_session(&paths)?);
-            }
-            let engine = guard
-                .as_mut()
-                .ok_or_else(|| AppError::Import("engine session unavailable".to_string()))?;
-            embed_sync(&mut engine.model, &texts, role)
+            let text_count = texts.len();
+            let before = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+            let _in_flight = InFlight(&in_flight);
+            let started = Instant::now();
+            eprintln!("[embedding] engine embed begin: {text_count} text(s), {before} in flight");
+            let result = (|| -> Result<(Vec<Vec<f32>>, i32), AppError> {
+                let mut guard = session
+                    .lock()
+                    .map_err(|e| AppError::LockPoisoned(format!("local engine session: {e}")))?;
+                if guard.is_none() {
+                    let load_started = Instant::now();
+                    eprintln!("[embedding] engine session load begin");
+                    *guard = Some(load_session(&paths)?);
+                    eprintln!(
+                        "[embedding] engine session load end: {} ms",
+                        load_started.elapsed().as_millis()
+                    );
+                }
+                let engine = guard
+                    .as_mut()
+                    .ok_or_else(|| AppError::Import("engine session unavailable".to_string()))?;
+                embed_sync(&mut engine.model, &texts, role)
+            })();
+            eprintln!(
+                "[embedding] engine embed end: {} ms, ok={} ({before} in flight before)",
+                started.elapsed().as_millis(),
+                result.is_ok()
+            );
+            result
         })
         .await
         .map_err(|e| AppError::Import(format!("engine task panicked: {e}")))?
     }
 
-    /// Drop the loaded session (e.g. after Remove; the next call reloads).
-    pub fn reset(&self) {
-        if let Ok(mut guard) = self.session.lock() {
-            *guard = None;
+    /// Drop the loaded session (e.g. after a backend switch, Remove, or a
+    /// Repair install; the next call lazy-reloads). `take()` under the brief
+    /// lock, then destroy the `EngineSession` (ORT teardown: intra-op thread
+    /// pool join + arena free) inside `spawn_blocking`.
+    ///
+    /// Regression note: this used to be a sync `reset()` that dropped the
+    /// session inline under the lock. Called from the then-synchronous
+    /// `set_embedding_backend` command it froze the whole app: the command
+    /// ran on the main thread holding the DB mutex while waiting out an
+    /// in-flight embed batch (the session mutex is held per batch), then
+    /// tore the ORT session down on the main thread. Callers must keep both
+    /// the wait and the teardown off the main thread and out of any DB-lock
+    /// scope.
+    pub async fn reset_off_thread(&self) -> Result<(), AppError> {
+        let in_flight = self.embeds_in_flight.load(Ordering::SeqCst);
+        let started = Instant::now();
+        eprintln!("[embedding] engine reset begin: {in_flight} embed(s) in flight");
+        let session = self
+            .session
+            .lock()
+            .map_err(|e| AppError::LockPoisoned(format!("local engine session: {e}")))?
+            .take();
+        eprintln!(
+            "[embedding] engine reset locked after {} ms: session_present={}",
+            started.elapsed().as_millis(),
+            session.is_some()
+        );
+        if session.is_none() {
+            return Ok(());
         }
+        let teardown = Instant::now();
+        tokio::task::spawn_blocking(move || drop(session))
+            .await
+            .map_err(|e| AppError::Import(format!("engine reset task panicked: {e}")))?;
+        eprintln!("[embedding] engine reset teardown end: {} ms", teardown.elapsed().as_millis());
+        Ok(())
     }
 }
 
@@ -164,10 +228,12 @@ fn resolve_dylib(
 fn ensure_ort_environment(paths: &EnginePaths) -> Result<(), AppError> {
     static INITIALIZED: OnceLock<()> = OnceLock::new();
     if INITIALIZED.get().is_some() {
+        eprintln!("[embedding] ort environment already committed");
         return Ok(());
     }
     let env_override = std::env::var("ORT_DYLIB_PATH").ok();
     let dylib = resolve_dylib(env_override.as_deref(), paths)?;
+    eprintln!("[embedding] ort environment resolving dylib: {dylib:?}");
     if let Some(path) = dylib {
         // Under load-dynamic, `commit()` returns a success bool.
         let builder = ort::init_from(&path)
@@ -177,6 +243,7 @@ fn ensure_ort_environment(paths: &EnginePaths) -> Result<(), AppError> {
                 "ONNX Runtime environment commit failed (already initialized?)".to_string(),
             ));
         }
+        eprintln!("[embedding] ort environment committed");
     }
     let _ = INITIALIZED.set(());
     Ok(())
@@ -186,6 +253,8 @@ fn ensure_ort_environment(paths: &EnginePaths) -> Result<(), AppError> {
 /// file bytes (the Q4 data file as an external initializer), thread budget,
 /// and a warmup embed as the plan's self-test.
 fn load_session(paths: &EnginePaths) -> Result<EngineSession, AppError> {
+    let started = Instant::now();
+    eprintln!("[embedding] engine session state gate begin: {}", paths.model_root.display());
     let manifest = local_manifest()?;
     match assess_installation(&paths.model_root, &manifest) {
         LocalEmbeddingState::Ready => {}
@@ -197,6 +266,7 @@ fn load_session(paths: &EnginePaths) -> Result<EngineSession, AppError> {
             )));
         }
     }
+    eprintln!("[embedding] engine session state gate: ready");
     ensure_ort_environment(paths)?;
     let profile_dir = paths.profile_dir();
     let read = |name: &str| -> Result<Vec<u8>, AppError> {
@@ -224,12 +294,17 @@ fn load_session(paths: &EnginePaths) -> Result<EngineSession, AppError> {
             .with_intra_threads(threads),
     )
     .map_err(|e| AppError::Import(format!("local embedding model failed to load: {e}")))?;
+    eprintln!(
+        "[embedding] engine session built in {} ms (threads={threads})",
+        started.elapsed().as_millis()
+    );
     // Self-test (plan §5): a warmup embed proves the session actually runs
     // before the first real query pays the discovery cost.
     let warmup = apply_role_prefix("warmup", EmbeddingRole::Query);
     model
         .embed(vec![warmup], Some(1))
         .map_err(|e| AppError::Import(format!("local embedding self-test failed: {e}")))?;
+    eprintln!("[embedding] engine session warmup ok: {} ms total", started.elapsed().as_millis());
     Ok(EngineSession { model })
 }
 
@@ -292,6 +367,15 @@ mod tests {
         let bad_dims = vec![vec![0.1; 4]];
         let err = validate_vectors(&bad_dims, 1).expect_err("dimension mismatch rejected");
         assert!(err.to_string().contains("dimensions"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn engine_reset_off_thread_without_a_session_is_a_noop() {
+        let engine = LocalEngine::new();
+        // Nothing loaded: Ok without spawning, and no session appears.
+        engine.reset_off_thread().await.expect("empty reset ok");
+        let guard = engine.session.lock().expect("session lock");
+        assert!(guard.is_none(), "no session appears after an empty reset");
     }
 
     #[test]

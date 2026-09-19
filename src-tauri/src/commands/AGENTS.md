@@ -182,7 +182,11 @@ the shared engine arrives separately as managed `Arc<LocalEngine>` (see
 `EmbeddingBackend::parse_exact` (strict command boundary: invalid ids error,
 never fall back) and `set` resets the capability triple to `unknown` so the
 next probe re-evaluates under the new backend (selection never implies
-readiness).
+readiness). `set` is ASYNC by necessity: the DB writes sit in a brief burst
+and the guard drops BEFORE `engine.reset_off_thread().await` - a sync
+command runs on the main thread, and the old body held the DB lock across
+the session reset (app freeze whenever a local embed batch was in flight;
+see `embedding/AGENTS.md`).
 Lock discipline: the storage root resolves under a brief burst and is
 released before any network I/O; downloads never hold the DB mutex.
 

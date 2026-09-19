@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { useLocalEmbeddings, type EmbeddingBackendId } from '@/composables/use-local-embeddings';
 import EmbeddingsConsentDialog from './embeddings-consent-dialog.vue';
 
@@ -21,10 +22,19 @@ const {
   remove,
 } = useLocalEmbeddings();
 
+const router = useRouter();
+
+/** Open the Help Reference Embeddings section (what embeddings do, provider options). */
+function openEmbeddingsHelp(): void {
+  router.push('/help?tab=reference#ref-embeddings');
+}
+
 /** Whether the consent dialog is open (pending switch to Bango Local). */
 const showConsent = ref(false);
 /** Component Details expansion. */
 const detailsOpen = ref(false);
+/** A backend switch is persisting (radios disabled so it cannot double-fire). */
+const switching = ref(false);
 /** Confirm state for Remove (two-step destructive action). */
 const confirmRemove = ref(false);
 /** Transient error surfaced by card-level actions. */
@@ -91,10 +101,13 @@ async function onBackendChange(value: EmbeddingBackendId): Promise<void> {
     showConsent.value = true; // radio visually reverts until confirmed
     return;
   }
+  switching.value = true;
   try {
     await selectBackend(value);
   } catch (e) {
     actionError.value = String(e);
+  } finally {
+    switching.value = false;
   }
 }
 
@@ -166,15 +179,19 @@ async function onRemove(): Promise<void> {
       Embeddings
     </h2>
     <p class="settings-card__desc">
-      Where the embedding model for semantic article search runs. The selection applies to this
-      device; selecting a provider never implies the local components are installed.
+      Embeddings let Bango find articles by meaning instead of exact keywords, powering semantic
+      search and the Citation Finder.
+      <button class="settings-card__learn-more" @click="openEmbeddingsHelp">
+        <span class="material-symbols-outlined">menu_book</span>
+        Learn more
+      </button>
     </p>
 
     <div v-if="actionError || error" class="settings-card__status emb-error">
       {{ actionError ?? error }}
     </div>
 
-    <fieldset class="emb-options" :disabled="loading || installing">
+    <fieldset class="emb-options" :disabled="loading || installing || switching">
       <legend class="emb-options__legend">Embedding Provider</legend>
       <label
         class="emb-option"
@@ -340,33 +357,6 @@ async function onRemove(): Promise<void> {
         </p>
       </div>
     </div>
-
-    <!-- Privacy table -->
-    <table class="emb-privacy">
-      <thead>
-        <tr>
-          <th></th>
-          <th>Configured Provider</th>
-          <th>Bango Local</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Embedding text processing</td>
-          <td>Sent to your provider's API</td>
-          <td>On this device only</td>
-        </tr>
-        <tr>
-          <td>Model storage</td>
-          <td>Provider-side</td>
-          <td>Bango documents folder</td>
-        </tr>
-      </tbody>
-    </table>
-    <p class="emb-privacy__note">
-      This table covers the embedding operation only. Other AI features (summaries, screening, chat)
-      continue to use your configured provider under their own settings.
-    </p>
 
     <!-- Consent dialog (first Bango Local download) -->
     <EmbeddingsConsentDialog
@@ -623,30 +613,5 @@ async function onRemove(): Promise<void> {
 .emb-details__fallback .material-symbols-outlined {
   font-size: 16px;
   flex-shrink: 0;
-}
-
-.emb-privacy {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12.5px;
-  margin-top: 0.75rem;
-}
-
-.emb-privacy th,
-.emb-privacy td {
-  text-align: left;
-  padding: 0.375rem 0.5rem;
-  border-bottom: 1px solid var(--color-surface-variant, #e4e1ee);
-}
-
-.emb-privacy th {
-  font-weight: 600;
-  color: var(--color-on-surface-variant, #464555);
-}
-
-.emb-privacy__note {
-  font-size: 11.5px;
-  color: var(--color-outline, #777587);
-  margin-top: 0.375rem;
 }
 </style>

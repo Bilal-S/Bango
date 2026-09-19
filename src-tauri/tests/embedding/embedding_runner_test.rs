@@ -82,6 +82,45 @@ async fn sender_local_probe_reports_not_installed_without_cloud_call() {
     assert_eq!(outcome.model, "", "no model is claimed for a disabled probe");
 }
 
+#[tokio::test]
+async fn sender_cloud_probe_without_config_reports_llm_not_configured() {
+    // Regression (switch-crash): the ConfiguredProvider branch called the
+    // trait method on `self`, which resolves back to this same override ->
+    // unbounded async recursion -> stack-overflow SIGSEGV. The production
+    // sender must reach the default probe body instead.
+    let dir = tempfile::tempdir().unwrap();
+    let sender = sender_for(EmbeddingBackend::ConfiguredProvider, dir.path());
+
+    let outcome = sender.probe_capability(None, None).await;
+    assert_eq!(outcome.status, "disabled");
+    assert_eq!(outcome.reason, "LLM not configured");
+    assert_eq!(outcome.dimensions, 0);
+}
+
+#[tokio::test]
+async fn sender_cloud_probe_delegates_to_the_http_probe() {
+    // Anthropic short-circuits before any HTTP, so reaching its "does not
+    // support embeddings" outcome proves the production sender runs the
+    // default probe body (not a self-recursive call).
+    let dir = tempfile::tempdir().unwrap();
+    let sender = sender_for(EmbeddingBackend::ConfiguredProvider, dir.path());
+    let cfg = LlmConfig {
+        provider: LlmProvider::Anthropic,
+        endpoint_url: "https://invalid.invalid".to_string(),
+        api_key_encrypted: None,
+        model_name: "claude-x".to_string(),
+        temperature: 0.0,
+        skip_temperature: false,
+        max_concurrent_requests: 1,
+        request_delay_ms: 0,
+        context_window_tokens: 8192,
+    };
+
+    let outcome = sender.probe_capability(Some(&cfg), None).await;
+    assert_eq!(outcome.status, "disabled");
+    assert!(outcome.reason.contains("does not support embeddings"), "got: {}", outcome.reason);
+}
+
 #[test]
 fn sender_provider_id_labels_backend() {
     let dir = tempfile::tempdir().unwrap();

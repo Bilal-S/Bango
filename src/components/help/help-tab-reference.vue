@@ -7,7 +7,7 @@ import HelpScrollToTop from '@/components/help/help-scroll-to-top.vue';
 /**
  * Reference tab.
  *
- * A sidebar + scroll-spy layout with 22 detailed sections. Accepts an `initialHash`
+ * A sidebar + scroll-spy layout with 23 detailed sections. Accepts an `initialHash`
  * prop (from the parent shell's route hash) so deep-links like
  * `/help?tab=reference#ref-references-citations` scroll to the right section on mount.
  */
@@ -315,6 +315,14 @@ watch(
           >
             <span class="material-symbols-outlined ref-nav__icon">backup</span>
             Backup & Restore
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-embeddings' }"
+            @click="selectRefSection('ref-embeddings')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">blur_on</span>
+            Embeddings
           </button>
         </nav>
       </aside>
@@ -2358,7 +2366,8 @@ ER  - </pre>
                   </li>
                   <li>
                     <strong>Embeddings</strong> - builds semantic-search vectors for the included
-                    corpus (skips articles already embedded).
+                    corpus (skips articles already embedded). See the
+                    <a href="#ref-embeddings">Embeddings</a> section for how this works.
                   </li>
                 </ol>
                 Files must follow the DOI-based naming convention (e.g. DOI
@@ -2516,6 +2525,96 @@ ER  - </pre>
               <strong>Bango Documents directory</strong> (shown in Settings &rarr; Storage) manually
               before deleting.
             </p>
+          </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
+        </section>
+
+        <!-- SECTION: EMBEDDINGS -->
+        <section id="ref-embeddings" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">blur_on</span>
+            <h2 class="ref-section__title">Embeddings</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              Embeddings are the technology behind Bango's meaning-based search. When Bango reads an
+              article, it also creates a compact numerical fingerprint of what the text means.
+              Because fingerprints capture meaning rather than exact wording, Bango can find a paper
+              about a "levy on sugar-sweetened beverages" even when you search for "sugary drink
+              tax".
+            </p>
+            <p>
+              These fingerprints power semantic article search and the Citation Finder. Bango builds
+              them automatically in the background the first time they are needed, so the first
+              search on a new corpus may take several minutes to prepare them.
+            </p>
+
+            <h3>Where Fingerprints Are Created</h3>
+            <ul>
+              <li>
+                <strong>Configured Provider (default):</strong> Bango sends article text to the
+                embedding API of the AI provider configured in Settings. This requires a provider
+                that offers embeddings and an active connection; usage is billed by your provider
+                like any other API call.
+              </li>
+              <li>
+                <strong>Bango Local:</strong> Bango downloads a small model (EmbeddingGemma 300M,
+                roughly 220-300 MB) once, then computes the fingerprints entirely on your computer.
+                After the download it needs no internet, adds no per-use cost, and your paper text
+                never leaves the device for embedding. It is not available on every computer (for
+                example, older Intel Macs).
+              </li>
+            </ul>
+            <p>
+              You can switch between the two at any time in Settings &rarr; Embeddings. The choice
+              applies to this device; switching never changes or deletes your articles.
+            </p>
+
+            <h3>How Bango Decides</h3>
+            <ul>
+              <li>
+                <strong>Configured Provider:</strong> Bango checks whether your provider supports
+                embeddings when you run Test Connection or start your first search. Providers
+                without an embedding API (Anthropic, Z.AI) leave the semantic features unavailable,
+                with a banner pointing you to Settings.
+              </li>
+              <li>
+                <strong>Bango Local:</strong> selecting it the first time shows a consent dialog
+                (what runs locally, the download size, and the Gemma license terms) before anything
+                is downloaded. Bango verifies the download and self-tests the model before reporting
+                success. If a search starts without the local components, Bango offers to download
+                them and continue, use the configured provider instead, or cancel. On unsupported
+                machines it falls back to the configured provider.
+              </li>
+              <li>
+                <strong>Switching models:</strong> fingerprints remember the model that created
+                them. If you change provider, model, or backend, Bango detects the mismatch and
+                offers to regenerate the fingerprints (or continue with partial recall).
+              </li>
+            </ul>
+
+            <h3>Where Your Text Is Processed</h3>
+            <p>
+              With Configured Provider, the embedding step happens on your provider's servers: the
+              text is sent over the internet, and the resulting fingerprints are stored in your
+              local project database. With Bango Local, both the model and the processing stay on
+              your computer.
+            </p>
+            <p>
+              This describes the embedding step only. Other AI features such as summaries,
+              screening, and chat continue to use your configured provider under their own settings.
+            </p>
+
+            <div class="ref-callout">
+              <h4>Manage in Settings</h4>
+              <p>
+                You can switch backends and download, verify, repair, or remove the local components
+                from Settings &rarr; Embeddings. Removing the local components only deletes the
+                downloaded model files; your articles stay untouched.
+              </p>
+            </div>
           </div>
           <footer class="ref-section__footer">
             <HelpScrollToTop @click="scrollToTop" />

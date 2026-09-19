@@ -48,6 +48,26 @@ pub fn resolve_effective_dim(probe_dim: i32, returned_dim: i32) -> i32 {
     }
 }
 
+/// Cloud embedding-capability probe (HTTP via the orchestrator). Shared by
+/// the trait's default implementation and [`BackendEmbeddingBatchSender`]'s
+/// `ConfiguredProvider` branch: calling the trait method from the override
+/// would resolve back to the override itself (unbounded async recursion,
+/// stack-overflow SIGSEGV on every cloud probe through the production sender).
+async fn probe_capability_via_http(
+    config: Option<&LlmConfig>,
+    override_model: Option<&str>,
+) -> crate::llm::embedding::ProbeOutcome {
+    let Some(config) = config else {
+        return crate::llm::embedding::ProbeOutcome {
+            status: "disabled".to_string(),
+            model: String::new(),
+            dimensions: 0,
+            reason: "LLM not configured".to_string(),
+        };
+    };
+    crate::llm::embedding::probe_embedding_support(config, override_model).await
+}
+
 /// Injectable sender (mirrors `IngestLlmSender`). Production: [`BackendEmbeddingBatchSender`]
 /// (backend-aware; its cloud branch delegates to the orchestrator); tests:
 /// fake with deterministic vectors.
@@ -72,15 +92,7 @@ pub trait EmbeddingBatchSender: Send + Sync {
         config: Option<&LlmConfig>,
         override_model: Option<&str>,
     ) -> crate::llm::embedding::ProbeOutcome {
-        let Some(config) = config else {
-            return crate::llm::embedding::ProbeOutcome {
-                status: "disabled".to_string(),
-                model: String::new(),
-                dimensions: 0,
-                reason: "LLM not configured".to_string(),
-            };
-        };
-        crate::llm::embedding::probe_embedding_support(config, override_model).await
+        probe_capability_via_http(config, override_model).await
     }
 
     /// Provider identity written into the `provider` column of generated
@@ -145,9 +157,10 @@ impl EmbeddingBatchSender for BackendEmbeddingBatchSender {
         override_model: Option<&str>,
     ) -> crate::llm::embedding::ProbeOutcome {
         match self.backend {
-            // Cloud selection: the default HTTP probe (config is required).
+            // Cloud selection: the shared HTTP probe body. Never call the
+            // trait method here - it would re-enter this same override.
             EmbeddingBackend::ConfiguredProvider => {
-                EmbeddingBatchSender::probe_capability(self, config, override_model).await
+                probe_capability_via_http(config, override_model).await
             }
             // Local selection: the offline probe (plan §7) - no cloud call,
             // no config needed.

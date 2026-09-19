@@ -6,6 +6,7 @@
 //! `probe_embeddings`: explicit probe (Test Connection).
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde::Serialize;
 use tauri::{Manager, State};
@@ -167,15 +168,26 @@ pub async fn probe_embeddings(
     // Read config + override (brief lock), release, then probe, then persist
     // (brief lock). Config may be None - the local backend works without it
     // and the cloud default probe reports "LLM not configured".
-    let (config, override_model) = {
+    let (config, override_model, backend_label) = {
         let conn = lock_conn(&db_state.conn)?;
         (
             llm_config_repo::get_config(&conn)?,
             app_settings_repo::get_embedding_model_override(&conn)?,
+            app_settings_repo::get_embedding_backend(&conn)?.as_str().to_string(),
         )
     };
+    let started = Instant::now();
+    eprintln!("[embedding] probe_embeddings begin: backend={backend_label}");
     let sender = crate::embedding::runner::backend_sender(&app_handle)?;
     let outcome = sender.probe_capability(config.as_ref(), override_model.as_deref()).await;
+    eprintln!(
+        "[embedding] probe_embeddings end: status={} dims={} model={} in {} ms ({})",
+        outcome.status,
+        outcome.dimensions,
+        outcome.model,
+        started.elapsed().as_millis(),
+        outcome.reason
+    );
     let new_status = if outcome.status == "enabled" {
         EmbeddingStatus::Enabled
     } else {
