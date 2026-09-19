@@ -7,6 +7,7 @@ import type {
   CitationFinderProgress,
   CitationFinderReadiness,
   CitationResult,
+  CitationStatusFlags,
   CitationStyle,
 } from '@/types/citation-finder';
 import {
@@ -17,6 +18,39 @@ import {
 
 /** Retrieval source for next outgoing message. Mutually exclusive. */
 type ChatSource = 'articles' | 'wiki' | 'citation-finder';
+
+/** localStorage key for the persisted Articles-to-Search selection. */
+const CITATION_STATUSES_STORAGE_KEY = 'bango-citation-statuses';
+
+/** Working + Included default ON, Rejected default OFF; duplicates excluded. */
+const DEFAULT_CITATION_STATUSES: CitationStatusFlags = {
+  working: true,
+  included: true,
+  rejected: false,
+};
+
+/**
+ * Read the persisted Articles-to-Search selection. Any missing key, parse
+ * error, or non-boolean shape falls back to the defaults (never throws).
+ * @returns A fresh flags object safe to mutate.
+ */
+function loadCitationStatuses(): CitationStatusFlags {
+  try {
+    const raw = localStorage.getItem(CITATION_STATUSES_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_CITATION_STATUSES };
+    const parsed = JSON.parse(raw) as Partial<Record<keyof CitationStatusFlags, unknown>>;
+    if (
+      typeof parsed?.working !== 'boolean' ||
+      typeof parsed?.included !== 'boolean' ||
+      typeof parsed?.rejected !== 'boolean'
+    ) {
+      return { ...DEFAULT_CITATION_STATUSES };
+    }
+    return { working: parsed.working, included: parsed.included, rejected: parsed.rejected };
+  } catch {
+    return { ...DEFAULT_CITATION_STATUSES };
+  }
+}
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -71,14 +105,16 @@ export const useChatStore = defineStore('chat', () => {
   /** Citation style. Captured at submit, frozen per-bubble. */
   const citationStyle = ref<CitationStyle>('APA');
 
+  /** Articles-to-Search selection. Persisted so navigation/restart does not
+   *  silently widen a run back to the default working+included union. */
+  const citationStatuses = ref<CitationStatusFlags>(loadCitationStatuses());
+
   /** Live progress from `citation:progress` event. */
   const citationProgress = ref<CitationFinderProgress | null>(null);
 
   /** True while a cancel is in flight (set by `cancelCitationSearch`, cleared
-   *  on any terminal event). Drives the "Cancelling…" spinner. The backend
-   *  sets the cancel flag; an in-flight LLM call completes naturally (or hits
-   *  the orchestrator timeout) before the cancel fires at the next check
-   *  point, so this flag covers that wait window. */
+   *  on any terminal event). Drives the "Cancelling…" spinner; the backend
+   *  aborts the in-flight call and emits `citation:error "Cancelled"`. */
   const cancelling = ref(false);
 
   function addSelectedArticle(id: string) {
@@ -153,6 +189,16 @@ export const useChatStore = defineStore('chat', () => {
   /** Set the citation style (only meaningful in the citation-finder input). */
   function setCitationStyle(style: CitationStyle) {
     citationStyle.value = style;
+  }
+
+  /** Persist the Articles-to-Search selection (best-effort localStorage). */
+  function setCitationStatuses(next: CitationStatusFlags) {
+    citationStatuses.value = { ...next };
+    try {
+      localStorage.setItem(CITATION_STATUSES_STORAGE_KEY, JSON.stringify(citationStatuses.value));
+    } catch {
+      // Best-effort: the in-memory selection still applies this session.
+    }
   }
 
   /** Cancel a running citation search. Sets the `cancelling` flag so the UI
@@ -239,6 +285,7 @@ export const useChatStore = defineStore('chat', () => {
       // during the event-driven wait.
     } catch (e) {
       cancelling.value = false;
+      citationProgress.value = null;
       error.value = e instanceof Error ? e.message : String(e);
       messages.value.push({
         role: 'assistant',
@@ -331,6 +378,7 @@ export const useChatStore = defineStore('chat', () => {
     mismatchDismissedFor,
     citationFinderMode,
     citationStyle,
+    citationStatuses,
     citationProgress,
     cancelling,
     addSelectedArticle,
@@ -345,6 +393,7 @@ export const useChatStore = defineStore('chat', () => {
     setMismatchDismissed,
     setCitationFinderMode,
     setCitationStyle,
+    setCitationStatuses,
     cancelCitationSearch,
     sendCitationSearch,
     sendMessage,

@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use tauri::{Manager, State};
 
@@ -172,6 +173,39 @@ pub struct FindCitationsContext<'a> {
     pub cancel_token: Arc<AtomicBool>,
     pub emit_progress: &'a (dyn Fn(CitationFinderProgress) + Send + Sync),
     pub app_handle: Option<tauri::AppHandle>,
+}
+
+/// Cancel poll interval for long-running awaits.
+const CANCEL_POLL_MS: u64 = 150;
+
+/// The single cancellation error shape the frontend matches as "Cancelled".
+fn cancelled_error() -> AppError {
+    AppError::Import("Cancelled".to_string())
+}
+
+/// Await a fallible future, aborting with `Cancelled` as soon as `cancel` is
+/// set (polled every [`CANCEL_POLL_MS`]). Dropping the future aborts the
+/// underlying HTTP request instead of letting it run to completion.
+async fn await_cancellable<T>(
+    cancel: &Arc<AtomicBool>,
+    fut: impl std::future::Future<Output = Result<T, AppError>>,
+) -> Result<T, AppError> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err(cancelled_error());
+    }
+    tokio::pin!(fut);
+    let watcher = async {
+        loop {
+            tokio::time::sleep(Duration::from_millis(CANCEL_POLL_MS)).await;
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+        }
+    };
+    tokio::select! {
+        value = fut => value,
+        () = watcher => Err(cancelled_error()),
+    }
 }
 
 /// The core spawn-safe search pipeline. Returns `Vec<CitationResult>` —
@@ -352,11 +386,12 @@ async fn run_whole_block(
     cancel_token: &Arc<AtomicBool>,
     emit_progress: &(dyn Fn(CitationFinderProgress) + Send + Sync),
 ) -> Result<Vec<CitationResult>, AppError> {
+    eprintln!("[citation] stage=embedding_query start");
     emit_progress(searching_progress("embedding_query", "Embedding query…"));
 
-    let hits = llm_sender.recall(text, 30, status_filter).await?;
+    let hits = await_cancellable(cancel_token, llm_sender.recall(text, 30, status_filter)).await?;
     if cancel_token.load(Ordering::Relaxed) {
-        return Err(AppError::Import("Cancelled".to_string()));
+        return Err(cancelled_error());
     }
     if hits.is_empty() {
         /* Empty recall is also a funnel outcome (embedding miss, empty pool,
@@ -369,13 +404,15 @@ async fn run_whole_block(
         return Ok(vec![CitationResult { claim: None, matches: vec![] }]);
     }
 
+    eprintln!("[citation] stage=ranking start");
     emit_progress(searching_progress("ranking", "Ranking passages…"));
     let user_tokens = tokenize_and_stem(text);
     let work = build_claim_work(&user_tokens, text, hits, db_state).await?;
     if cancel_token.load(Ordering::Relaxed) {
-        return Err(AppError::Import("Cancelled".to_string()));
+        return Err(cancelled_error());
     }
 
+    eprintln!("[citation] stage=classifying start");
     emit_progress(searching_progress("classifying", "Classifying…"));
     let finalists = pool_finalists(vec![work]);
     let metadata = load_metadata(db_state, &finalists.article_ids).await?;
@@ -395,12 +432,25 @@ async fn run_whole_block(
         })
         .collect();
     let user_prompt = build_whole_block_prompt(text, &passages, &metadata);
-    /* Cancel check before the (up to 120s) classification call. Confines
-    the wait window to the actual HTTP round-trip. */
+    /* Cancel check before the classification call, then the call itself
+    races the cancel token (dropping the HTTP future on cancel). */
     if cancel_token.load(Ordering::Relaxed) {
-        return Err(AppError::Import("Cancelled".to_string()));
+        return Err(cancelled_error());
     }
-    let json = llm_sender.send_classification(CITATION_FINDER_SYSTEM_PROMPT, &user_prompt).await?;
+    let classify_started = Instant::now();
+    let json = await_cancellable(
+        cancel_token,
+        llm_sender.send_classification(CITATION_FINDER_SYSTEM_PROMPT, &user_prompt),
+    )
+    .await?;
+    eprintln!(
+        "[citation] stage=classifying end elapsed_ms={}",
+        classify_started.elapsed().as_millis()
+    );
+    /* A classification that completed after the Cancel click is discarded. */
+    if cancel_token.load(Ordering::Relaxed) {
+        return Err(cancelled_error());
+    }
     /* Lenient parse: snake_case + camelCase, object-wrapped arrays, per-element
     fault isolation (one bad entry doesn't drop the whole batch). */
     let llm_outputs = parse_citation_outputs(&json)
@@ -408,6 +458,7 @@ async fn run_whole_block(
 
     let matches = merge_outputs(&llm_outputs, &finalists, &metadata, None);
     emit_funnel_progress(emit_progress, funnel_from(&finalists, &llm_outputs, matches.len()));
+    eprintln!("[citation] stage=done matches={}", matches.len());
     Ok(vec![CitationResult { claim: None, matches }])
 }
 
@@ -421,10 +472,11 @@ async fn run_per_statement(
     cancel_token: &Arc<AtomicBool>,
     emit_progress: &(dyn Fn(CitationFinderProgress) + Send + Sync),
 ) -> Result<Vec<CitationResult>, AppError> {
+    eprintln!("[citation] stage=claim_split start");
     emit_progress(searching_progress("embedding_query", "Splitting claims…"));
-    let split_json = llm_sender.send_claim_split(text).await?;
+    let split_json = await_cancellable(cancel_token, llm_sender.send_claim_split(text)).await?;
     if cancel_token.load(Ordering::Relaxed) {
-        return Err(AppError::Import("Cancelled".to_string()));
+        return Err(cancelled_error());
     }
     let raw_claims: Vec<String> = serde_json::from_str(&split_json)
         .map_err(|e| AppError::Import(format!("Claim splitter returned invalid JSON: {e}")))?;
@@ -442,18 +494,21 @@ async fn run_per_statement(
         .await;
     }
 
+    eprintln!("[citation] stage=ranking start claims={}", claims.len());
     emit_progress(searching_progress("ranking", "Ranking passages per claim…"));
     let mut works: Vec<ClaimWork> = Vec::with_capacity(claims.len());
     for claim in &claims {
         if cancel_token.load(Ordering::Relaxed) {
-            return Err(AppError::Import("Cancelled".to_string()));
+            return Err(cancelled_error());
         }
-        let hits = llm_sender.recall(claim, 30, status_filter).await?;
+        let hits =
+            await_cancellable(cancel_token, llm_sender.recall(claim, 30, status_filter)).await?;
         let user_tokens = tokenize_and_stem(claim);
         let work = build_claim_work(&user_tokens, claim, hits, db_state).await?;
         works.push(work);
     }
 
+    eprintln!("[citation] stage=classifying start");
     emit_progress(searching_progress("classifying", "Classifying…"));
     let finalists = pool_finalists(works);
     let metadata = load_metadata(db_state, &finalists.article_ids).await?;
@@ -473,12 +528,25 @@ async fn run_per_statement(
         }
     }
     let user_prompt = build_per_statement_prompt(&claims, &passages, &metadata);
-    /* Cancel check before the (up to 120s) classification call
-    (mirrors whole-block guard). */
+    /* Cancel check before the classification call, then the call itself
+    races the cancel token (mirrors whole-block). */
     if cancel_token.load(Ordering::Relaxed) {
-        return Err(AppError::Import("Cancelled".to_string()));
+        return Err(cancelled_error());
     }
-    let json = llm_sender.send_classification(CITATION_FINDER_SYSTEM_PROMPT, &user_prompt).await?;
+    let classify_started = Instant::now();
+    let json = await_cancellable(
+        cancel_token,
+        llm_sender.send_classification(CITATION_FINDER_SYSTEM_PROMPT, &user_prompt),
+    )
+    .await?;
+    eprintln!(
+        "[citation] stage=classifying end elapsed_ms={}",
+        classify_started.elapsed().as_millis()
+    );
+    /* A classification that completed after the Cancel click is discarded. */
+    if cancel_token.load(Ordering::Relaxed) {
+        return Err(cancelled_error());
+    }
     /* Lenient parse: snake_case + camelCase, object-wrapped arrays, per-element
     fault isolation (one bad entry doesn't drop the whole batch). */
     let llm_outputs = parse_citation_outputs(&json)
@@ -493,6 +561,7 @@ async fn run_per_statement(
         results.push(CitationResult { claim: Some(claim.clone()), matches });
     }
     emit_funnel_progress(emit_progress, funnel_from(&finalists, &llm_outputs, classified_total));
+    eprintln!("[citation] stage=done matches={classified_total}");
     Ok(results)
 }
 

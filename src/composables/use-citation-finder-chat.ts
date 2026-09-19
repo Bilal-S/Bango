@@ -12,12 +12,16 @@ import { useToast } from '@/composables/use-toast';
 import {
   getReadiness,
   getModelMismatch,
-  regenerateEmbeddings,
+  regenerateEmbeddingsWithProgress,
 } from '@/composables/use-citation-finder';
-import type { CitationFinderMode, EmbeddingModelMismatch } from '@/types/citation-finder';
+import type {
+  CitationFinderMode,
+  CitationFinderProgress,
+  CitationStatusFlags,
+  EmbeddingModelMismatch,
+} from '@/types/citation-finder';
 import type { useLocalEmbeddings } from '@/composables/use-local-embeddings';
 import type { useChatStore } from '@/stores/chat';
-import type { CitationStatusFlags } from '@/components/citation-input-area.vue';
 
 export function useCitationFinderChat(args: {
   /** The chat store. */
@@ -34,22 +38,24 @@ export function useCitationFinderChat(args: {
   const { chatStore } = args;
   const toast = useToast();
 
-  /** Status-filter checkboxes. Working + Included default ON, Rejected
-   * default OFF, Duplicate always excluded (hidden). */
-  const citationStatuses = ref<CitationStatusFlags>({
-    working: true,
-    included: true,
-    rejected: false,
-  });
+  /** Articles-to-Search selection (store-backed + localStorage-persisted). */
+  const citationStatuses = computed(() => chatStore.citationStatuses);
 
   /** Computed status filter array passed to the backend. */
   const citationStatusFilter = computed(() => {
+    const selected = chatStore.citationStatuses;
     const out: string[] = [];
-    if (citationStatuses.value.working) out.push('working');
-    if (citationStatuses.value.included) out.push('included');
-    if (citationStatuses.value.rejected) out.push('rejected');
+    if (selected.working) out.push('working');
+    if (selected.included) out.push('included');
+    if (selected.rejected) out.push('rejected');
     return out;
   });
+
+  /** Persist a selection change, then re-check readiness under the new scope. */
+  function setCitationStatuses(next: CitationStatusFlags): void {
+    chatStore.setCitationStatuses(next);
+    void args.checkReadiness();
+  }
 
   /** Whether the citation input area is shown (source === 'citation-finder'). */
   const isCitationMode = computed(() => chatStore.source === 'citation-finder');
@@ -149,6 +155,9 @@ export function useCitationFinderChat(args: {
   const pendingSearchText = ref('');
   /** True while the Regenerate action is dispatching. */
   const regenerating = ref(false);
+  /** Live `embedding:progress` payload while regenerating (drives the dialog
+   *  progress bar); cleared on completion/failure. */
+  const regeneratingProgress = ref<CitationFinderProgress | null>(null);
 
   /* T7 contextual Bango Local prompt: when the local backend is selected
    * but not installed, a submit opens the download prompt instead of the
@@ -196,21 +205,22 @@ export function useCitationFinderChat(args: {
 
   /**
    * Confirm the mismatch dialog: regenerate all embeddings in the active
-   * status scope. The held prose is NOT auto-submitted (the regeneration is
-   * async); it is restored to the textarea for a one-click re-submit.
+   * status scope while streaming live progress into the dialog. The held
+   * prose is NOT auto-submitted (the regeneration is async); it is restored
+   * to the textarea for a one-click re-submit.
    */
   async function confirmMismatchRegenerate(): Promise<void> {
     if (!mismatchDialog.value || regenerating.value) return;
     regenerating.value = true;
+    regeneratingProgress.value = null;
     try {
       /* Scope regeneration to the same statuses the search uses so we
        * don't wipe embeddings generated for other statuses. */
       const scope = citationStatusFilter.value.join(',');
-      await regenerateEmbeddings(scope);
-      toast.show(
-        'Regenerating embeddings in the background. Search again once the progress bar completes.',
-        'info'
-      );
+      await regenerateEmbeddingsWithProgress(scope, (p) => {
+        regeneratingProgress.value = p;
+      });
+      toast.show('Embeddings regenerated. Search again to use the updated vectors.', 'info');
       chatStore.citationDraft = pendingSearchText.value;
       pendingSearchText.value = '';
       /* Mark mismatch resolved so the dialog doesn't re-fire for the same
@@ -221,11 +231,12 @@ export function useCitationFinderChat(args: {
       void args.checkReadiness();
     } catch (e) {
       toast.show(
-        `Failed to start regeneration: ${e instanceof Error ? e.message : String(e)}`,
+        `Embedding regeneration failed: ${e instanceof Error ? e.message : String(e)}`,
         'error'
       );
     } finally {
       regenerating.value = false;
+      regeneratingProgress.value = null;
     }
   }
 
@@ -317,6 +328,7 @@ export function useCitationFinderChat(args: {
   return {
     citationStatuses,
     citationStatusFilter,
+    setCitationStatuses,
     isCitationMode,
     citationToggleState,
     citationToggleTitle,
@@ -326,6 +338,7 @@ export function useCitationFinderChat(args: {
     handleCitationSend,
     mismatchDialog,
     regenerating,
+    regeneratingProgress,
     confirmMismatchRegenerate,
     continueMismatchSearch,
     cancelMismatchDialog,

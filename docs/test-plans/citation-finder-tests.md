@@ -123,6 +123,11 @@ private internals (`merge_outputs`, `pool_finalists`, `ClaimWork`, `Finalists`)
 | `src-tauri/tests/embedding/embedding_model_mismatch_test.rs::list_distinct_model_names_empty_when_table_empty` | empty table → empty vec |
 | `src-tauri/tests/embedding/embedding_model_mismatch_test.rs::list_distinct_model_names_omits_null_and_empty` | NULL/empty model_name filtered out |
 | `src-tauri/tests/embedding/embedding_model_mismatch_test.rs::delete_all_embeddings_clears_every_row` | DELETE FROM article_embeddings wipes all rows |
+| `src-tauri/tests/citation_finder/citation_finder_pipeline_test.rs::cancel_during_hanging_classification_returns_cancelled` | Cancel interrupts a pending classify promptly (select! poll) with `Cancelled` |
+| `src-tauri/tests/citation_finder/citation_finder_pipeline_test.rs::cancel_during_hanging_recall_returns_cancelled` | Cancel interrupts a pending recall promptly with `Cancelled` |
+| `src-tauri/tests/citation_finder/citation_finder_pipeline_test.rs::cancel_after_completed_classification_returns_cancelled` | A classification that returned after the Cancel click is discarded (no done-with-results) |
+| `src-tauri/tests/commands/citation_finder_guard_test.rs::guard_starts_and_clears_cancel` | A fresh run start clears the cancel token and marks `is_running` |
+| `src-tauri/tests/commands/citation_finder_guard_test.rs::guard_returns_existing_snapshot_without_clearing_cancel` | A second Find while running returns the snapshot and keeps the cancel token set |
 
 ## TypeScript (Phase B - frontend)
 
@@ -144,6 +149,19 @@ private internals (`merge_outputs`, `pool_finalists`, `ClaimWork`, `Finalists`)
 | `src/__tests__/chat.test.ts::citation_finder_source_toggle` | 3rd source toggle works |
 | `src/__tests__/chat.test.ts::sendMessage_branch_dispatches_find_citations` | citation branch does not call send_chat_message |
 | `src/__tests__/chat.test.ts::clearChat_drops_citation_bubbles` | reset clears citations array |
+| `src/__tests__/stores/chat.test.ts::citation_statuses_default_and_persist` | Articles-to-Search defaults + write-through + reload from localStorage |
+| `src/__tests__/stores/chat.test.ts::citation_statuses_invalid_storage_falls_back_to_defaults` | Garbage/mis-shaped storage falls back to defaults (never throws) |
+| `src/__tests__/stores/chat.test.ts::clears_citation_progress_when_the_search_command_rejects` | Command-reject path clears `citationProgress` like the terminal events |
+| `src/__tests__/composables/use-citation-finder-chat.test.ts::status_change_persists_and_rechecks_readiness` | Selection change persists to the store and re-checks readiness under the new filter |
+| `src/__tests__/composables/use-citation-finder.test.ts::rebase_uses_the_scope_universe_when_a_baseline_is_present` | Phase B runner counts are rebased onto the coverage baseline (10/25 + 1 -> 11/25, 40%) |
+| `src/__tests__/composables/use-citation-finder.test.ts::rebase_never_moves_the_percent_backward_across_a_run` | The rebased percent is monotonic across a full run and reaches 90% |
+| `src/__tests__/composables/use-citation-finder.test.ts::rebase_clamps_to_the_scope_total` | Cumulative done clamps at the scope total (no overshoot past 90%) |
+| `src/__tests__/composables/use-citation-finder.test.ts::rebase_falls_back_to_run_counts_without_a_baseline` | No baseline -> run-relative counts stand alone |
+| `src/__tests__/composables/use-citation-finder.test.ts::rebase_zero_total_is_safe` | Zero total -> 0% and no division by zero |
+| `src/__tests__/composables/use-citation-finder.test.ts::regenerate_with_progress_streams_embedding_events_and_unlistens` | Regenerate subscribes to `embedding:progress`, forwards rebased updates, and always unlistens |
+| `src/__tests__/composables/use-citation-finder-chat.test.ts::regenerate_reports_live_progress_until_completion` | The mismatch Regenerate exposes live progress while running and clears it on completion |
+| `src/__tests__/components/citation-mismatch-dialog.test.ts::renders_regeneration_progress_while_running` | The dialog renders the live message + percent width while regenerating |
+| `src/__tests__/components/citation-mismatch-dialog.test.ts::omits_progress_without_a_payload_and_relabels_the_button` | No payload -> no bar; the button reads "Regenerating…" |
 
 ## Notes
 

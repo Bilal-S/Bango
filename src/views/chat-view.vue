@@ -26,6 +26,7 @@ import { useChatArticleContext } from '@/composables/use-chat-article-context';
 import { useChatWiki } from '@/composables/use-chat-wiki';
 import { useChatTranscript } from '@/composables/use-chat-transcript';
 import { useCitationFinderChat } from '@/composables/use-citation-finder-chat';
+import type { CitationStatusFlags } from '@/types/citation-finder';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import WikiPageViewer from '@/components/wiki/wiki-page-viewer.vue';
 import ChatWelcomeCards from '@/components/chat-welcome-cards.vue';
@@ -151,6 +152,7 @@ const {
   handleCitationSend,
   mismatchDialog,
   regenerating,
+  regeneratingProgress,
   confirmMismatchRegenerate,
   continueMismatchSearch,
   cancelMismatchDialog,
@@ -162,8 +164,8 @@ const {
 } = citation;
 
 /** Status-checkbox updates arrive as fresh objects from the input area. */
-function onStatusesChange(next: typeof citationStatuses.value): void {
-  citationStatuses.value = next;
+function onStatusesChange(next: CitationStatusFlags): void {
+  citation.setCitationStatuses(next);
 }
 
 /* Reactively re-check readiness when LLM config changes (provider switch,
@@ -492,6 +494,7 @@ onUnmounted(() => {
     <CitationMismatchDialog
       :mismatch="mismatchDialog"
       :regenerating="regenerating"
+      :regenerating-progress="regeneratingProgress"
       @regenerate="confirmMismatchRegenerate"
       @continue="continueMismatchSearch"
       @cancel="cancelMismatchDialog"

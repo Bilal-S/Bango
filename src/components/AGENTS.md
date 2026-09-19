@@ -263,9 +263,11 @@ chrome lives in `settings-card-shared.css`.
   routing; the `data-msg-idx` attributes feed the transcript scroll anchor),
   `selected-articles-bar.vue` (context pills + hover tooltip),
   `article-selector-modal.vue` (teleported selector; owns its search
-  filter), `citation-input-area.vue` (banners, controls row, prose +
+  filter),   `citation-input-area.vue` (banners, controls row, prose +
   progress; every change emitted), `citation-mismatch-dialog.vue`
-  (teleported Regenerate/Continue/Cancel dialog).
+  (teleported Regenerate/Continue/Cancel dialog; while regenerating it shows
+  the live `embedding:progress` message + bar passed down as
+  `regeneratingProgress`, and the button reads "Regenerating…").
 
 ### Bibliometric network graph quartet (`*-network-graph.vue`)
 

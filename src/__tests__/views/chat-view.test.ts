@@ -158,6 +158,7 @@ vi.mock('@/composables/use-citation-finder', async (importOriginal) => {
     getReadiness: vi.fn(() => Promise.resolve(mockReadiness.value)),
     getModelMismatch: vi.fn(() => Promise.resolve(mockMismatch.value)),
     regenerateEmbeddings: mockRegenerate,
+    regenerateEmbeddingsWithProgress: mockRegenerate,
     stopCitationListeners: vi.fn(),
     cancelSearch: vi.fn().mockResolvedValue(undefined),
     findCitations: vi.fn(
@@ -524,7 +525,7 @@ describe('chat-view.vue - citation finder submit pipeline', () => {
     await submitCitationSearch(wrapper, 'Held prose.');
     (document.body.querySelector('.mismatch-dialog__btn--primary') as HTMLButtonElement).click();
     await flushPromises();
-    expect(mockRegenerate).toHaveBeenCalledWith('working,included');
+    expect(mockRegenerate).toHaveBeenCalledWith('working,included', expect.any(Function));
     expect(store.citationDraft).toBe('Held prose.');
     expect(store.mismatchDismissedFor).toBe('old-model');
     expect(document.body.querySelector('.mismatch-dialog')).toBeNull();

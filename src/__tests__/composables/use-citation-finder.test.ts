@@ -5,9 +5,11 @@ import {
   findCitations,
   getModelMismatch,
   regenerateEmbeddings,
+  regenerateEmbeddingsWithProgress,
+  rebasePhaseBProgress,
 } from '@/composables/use-citation-finder';
 import { tauriCommand } from '@/composables/use-tauri-command';
-import type { CitationMatch } from '@/types/citation-finder';
+import type { CitationFinderProgress, CitationMatch } from '@/types/citation-finder';
 
 vi.mock('@/composables/use-tauri-command', () => ({
   isTauri: () => true,
@@ -99,6 +101,43 @@ describe('use-citation-finder (pure helpers)', () => {
     });
   });
 
+  describe('rebasePhaseBProgress', () => {
+    it('rebase_uses_the_scope_universe_when_a_baseline_is_present', () => {
+      // Coverage 10/25 at Phase B start; the runner reports run-relative counts
+      // (processed 1 of 15 needed). The bar must continue from the coverage.
+      const rebased = rebasePhaseBProgress({ processed: 1, total: 15 }, { done: 10, total: 25 });
+      expect(rebased).toEqual({ done: 11, total: 25, overallPercent: 40 });
+    });
+
+    it('rebase_never_moves_the_percent_backward_across_a_run', () => {
+      const baseline = { done: 10, total: 25 };
+      let last = -1;
+      for (let processed = 1; processed <= 15; processed++) {
+        const rebased = rebasePhaseBProgress({ processed, total: 15 }, baseline);
+        expect(rebased.overallPercent).toBeGreaterThanOrEqual(last);
+        last = rebased.overallPercent;
+      }
+      expect(last).toBe(90);
+    });
+
+    it('rebase_clamps_to_the_scope_total', () => {
+      const rebased = rebasePhaseBProgress({ processed: 8, total: 5 }, { done: 24, total: 25 });
+      expect(rebased.done).toBe(25);
+      expect(rebased.overallPercent).toBe(90);
+    });
+
+    it('rebase_falls_back_to_run_counts_without_a_baseline', () => {
+      const rebased = rebasePhaseBProgress({ processed: 3, total: 10 }, null);
+      expect(rebased).toEqual({ done: 3, total: 10, overallPercent: 27 });
+    });
+
+    it('rebase_zero_total_is_safe', () => {
+      const rebased = rebasePhaseBProgress({ processed: 1, total: 0 }, { done: 0, total: 0 });
+      expect(rebased.overallPercent).toBe(0);
+      expect(rebased.total).toBe(0);
+    });
+  });
+
   describe('findCitations IPC wiring', () => {
     it('findCitations_dispatches_command_and_listens_for_done', async () => {
       // The command returns an initial progress snapshot; the assistant bubble
@@ -178,6 +217,34 @@ describe('use-citation-finder (pure helpers)', () => {
       (tauriCommand as any).mockResolvedValue(undefined);
       await regenerateEmbeddings(null);
       expect(tauriCommand).toHaveBeenCalledWith('regenerate_embeddings', { statusFilter: null });
+    });
+  });
+
+  describe('regenerateEmbeddingsWithProgress', () => {
+    it('regenerate_with_progress_streams_embedding_events_and_unlistens', async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      const unlisten = vi.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (listen as any).mockImplementationOnce(async (_event: string, cb: (e: any) => void) => {
+        cb({ payload: { processed: 2, total: 8 } });
+        return unlisten;
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (tauriCommand as any).mockResolvedValue(undefined);
+      const updates: CitationFinderProgress[] = [];
+
+      await regenerateEmbeddingsWithProgress('working', (p) => updates.push(p));
+
+      expect(listen).toHaveBeenCalledWith('embedding:progress', expect.any(Function));
+      expect(tauriCommand).toHaveBeenCalledWith('regenerate_embeddings', {
+        statusFilter: 'working',
+      });
+      expect(updates).toHaveLength(1);
+      const update = updates[0];
+      expect(update?.phase).toBe('preparing_embeddings');
+      expect(update?.message).toBe('Regenerating embeddings… 2/8 articles');
+      expect(update?.overallPercent).toBe(23);
+      expect(unlisten).toHaveBeenCalled();
     });
   });
 });

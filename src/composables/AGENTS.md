@@ -70,7 +70,11 @@ views, LLM config, wiki, dashboard, saved reports, and the startup upgrade.
   `use-citation-finder-chat.ts` (chat-view's Citation Finder orchestration:
   readiness + backend-aware toggle state/title with the stale-disabled
   self-heal, the submit pipeline - contextual local-embeddings prompt ->
-  model-mismatch dialog -> dispatch - and both dialogs' handlers; wired in
+  model-mismatch dialog -> dispatch - both dialogs' handlers (the mismatch
+  Regenerate streams live `embedding:progress` into `regeneratingProgress`),
+  and the
+  store-persisted Articles-to-Search selection (`setCitationStatuses` writes
+  through the store and re-checks readiness under the new scope); wired in
   chat-view with deferred self-references for `checkReadiness`/`runSearch`),
   `use-chat-wiki.ts` (wiki availability, page-title + source-metadata maps,
   drift check, wiki-mode toggle, reader nav stack),

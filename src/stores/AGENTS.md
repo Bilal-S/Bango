@@ -35,6 +35,15 @@ mechanism so the user's typed-but-unsent text survives a tab-away + tab-back.
 `chatStore.citationDraft`. `clearChat()` deliberately does NOT clear these
 ("Clear Chat" wipes conversation history, not in-progress typing).
 
+**Articles-to-Search persistence**: `chatStore.citationStatuses` is the
+store-backed selection, persisted to `localStorage` (`bango-citation-statuses`)
+with a validated load (any parse/shape failure falls back to the
+working+included defaults). This stops a remount or restart from silently
+widening a run back to the default status union. `setCitationStatuses` writes
+through; the chat view calls it via `use-citation-finder-chat`, which also
+re-checks readiness under the new scope. `sendCitationSearch`'s command-reject
+path clears `citationProgress` (same as the terminal-event handlers).
+
 ## Work Guidance
 
 - Cross-view UI state that must survive component unmount belongs in a store,

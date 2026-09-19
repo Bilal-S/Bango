@@ -294,12 +294,19 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
 - **Cancel token is `Arc<AtomicBool>`** (not `Mutex<bool>`), matching the
   embedding runner's contract - `generate_embeddings_inner` takes
   `Option<Arc<AtomicBool>>` and the same token covers Phase B + Phase C.
-  Cancel is checked between phases, between recall/passage calls, and before
-  the 120s classification call. An in-flight LLM call completes naturally (or
-  hits the orchestrator timeout) before the cancel fires at the next check
-  point; the frontend `cancelling` spinner covers that wait window. (The
-  screening engine's millisecond `tokio::select!` cancel is not warranted for
-  a single user-initiated search.)
+  Every Phase-C await that can stall (recall, claim-split, classify) runs
+  through `await_cancellable`, a `tokio::select!` against a 150ms cancel poll:
+  a Cancel click drops the in-flight HTTP future instead of waiting out the
+  120s timeout. Both pipelines also re-check the token after a classification
+  returns, so a call that completed after the click is discarded.
+  `commands/citation_finder.rs`'s start guard (`begin_citation_run`) resets
+  the token ONLY when a new run actually starts - a second Find click returns
+  the running snapshot and must not un-cancel the active search.
+  `find_citations` wraps the pipeline in `FutureExt::catch_unwind`: a panic
+  becomes a terminal `citation:error` and always clears `is_running` (the
+  pre-fix task could die silently and wedge every later Find behind the
+  `is_running` guard). `[citation] stage=<name> start/end elapsed_ms` stderr
+  logs trace the pipeline for the next live diagnosis.
 - **Per-article lock discipline**: `build_claim_work` and `load_metadata` are
   `async` and each takes a brief `lock_conn` burst per article (releasing
   between articles, with `tokio::task::yield_now()`), so the `DbState` mutex
@@ -351,7 +358,11 @@ external test.
 - `cargo test --test citation_finder` - includes the E2E pipeline suite
   (`citation_finder_pipeline_test.rs`: SDIL reproduction, paraphrase
   cosine-chunk fallback, unrelated-drop funnel visibility, finalist-union
-  rescue, per-statement grouping, empty-recall funnel).
+  rescue, per-statement grouping, empty-recall funnel, cancellation during a
+  hanging recall/classification, post-classification cancel).
+- `cargo test --test commands citation_finder_guard` - the run-slot guard
+  (`begin_citation_run`): a fresh start clears the token + marks running; a
+  second start while running returns the snapshot and keeps the token set.
 - `cargo test --test citation_finder_similarity_test` - containment +
   Jaccard (failure-mode pin) + `find_best_passage` + tokenizer edge cases.
 - `cargo test --test citation_finder_prompt_test` - system-prompt shape,
@@ -373,8 +384,10 @@ external test.
 - `cargo clippy --lib -- -D warnings` - clean (the project gate).
 - `cargo fmt --check` - clean.
 - Frontend: `npx vitest run src/__tests__/composables/use-citation-finder.test.ts
-  src/__tests__/components/citation-result-card.test.ts src/__tests__/chat.test.ts`
-  - formatCitation/findCitations + card + store (incl. citation-finder).
+  src/__tests__/components/citation-result-card.test.ts src/__tests__/chat.test.ts
+  src/__tests__/stores/chat.test.ts src/__tests__/composables/use-citation-finder-chat.test.ts`
+  - formatCitation/findCitations + card + store (incl. citation-finder) +
+  Articles-to-Search persistence.
 
 ## Child DOX Index
 

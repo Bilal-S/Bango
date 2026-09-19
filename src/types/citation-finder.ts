@@ -12,6 +12,13 @@ export type CitationStyle = 'APA' | 'MLA' | 'Chicago' | 'IEEE' | 'AMA';
 /** How pasted text is processed. Matches Rust enum (snake_case on wire). */
 export type CitationFinderMode = 'whole_block' | 'per_statement';
 
+/** Articles-to-Search status selection. Duplicates are always excluded. */
+export interface CitationStatusFlags {
+  working: boolean;
+  included: boolean;
+  rejected: boolean;
+}
+
 /**
  * One matched citation: one article's best passage + the LLM classification.
  * Mirrors `CitationMatch` in `citation_finder/mod.rs`.

@@ -1,12 +1,3 @@
-<script lang="ts">
-/** Status-filter checkbox state. Duplicates are always excluded. */
-export interface CitationStatusFlags {
-  working: boolean;
-  included: boolean;
-  rejected: boolean;
-}
-</script>
-
 <script setup lang="ts">
 /**
  * Citation Finder input area: replaces the article-context pills + chat bar
@@ -19,6 +10,7 @@ import type {
   CitationFinderMode,
   CitationFinderProgress,
   CitationFinderReadiness,
+  CitationStatusFlags,
   CitationStyle,
 } from '@/types/citation-finder';
 

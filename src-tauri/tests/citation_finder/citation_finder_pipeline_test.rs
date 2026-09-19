@@ -12,8 +12,9 @@
 //! prompt building, grounding, funnel emission - runs for real against a
 //! seeded SQLite DB.
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bango_lib::citation_finder::search::{run_phase_c, CitationLlmSender};
@@ -412,4 +413,150 @@ async fn empty_recall_reports_zero_funnel() {
     let funnel = events.iter().filter_map(|e| e.funnel).next().expect("funnel event");
     assert_eq!(funnel.recalled, 0);
     assert_eq!(funnel.finalists, 0);
+}
+
+// ── Cancellation (stuck `Classifying…` regression) ───────────────────────────
+
+/// Stage a [`CancelSender`] blocks on forever.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HangStage {
+    None,
+    Recall,
+    Classification,
+}
+
+/// Sender for the cancellation tests: optionally never returns from one stage,
+/// or flips the cancel token from inside the classification call (to exercise
+/// the post-call cancel check).
+struct CancelSender {
+    hits: Vec<EmbeddingHit>,
+    classification_json: String,
+    hang: HangStage,
+    flip_cancel_on_classify: Option<Arc<AtomicBool>>,
+}
+
+impl CancelSender {
+    fn hanging(hang: HangStage) -> Self {
+        Self {
+            hits: vec![hit("sdil", 0.55, Some(0))],
+            classification_json: format!("[{}]", validating_output("sdil", "", &[SDIL_THESIS])),
+            hang,
+            flip_cancel_on_classify: None,
+        }
+    }
+}
+
+#[async_trait]
+impl CitationLlmSender for CancelSender {
+    async fn send_classification(
+        &self,
+        _system_prompt: &str,
+        _user_prompt: &str,
+    ) -> Result<String, AppError> {
+        if self.hang == HangStage::Classification {
+            std::future::pending::<()>().await;
+        }
+        if let Some(token) = &self.flip_cancel_on_classify {
+            token.store(true, Ordering::Relaxed);
+        }
+        Ok(self.classification_json.clone())
+    }
+
+    async fn send_claim_split(&self, _text: &str) -> Result<String, AppError> {
+        Ok("[]".to_string())
+    }
+
+    async fn recall(
+        &self,
+        _query: &str,
+        _top_k: usize,
+        _statuses: &[String],
+    ) -> Result<Vec<EmbeddingHit>, AppError> {
+        if self.hang == HangStage::Recall {
+            std::future::pending::<()>().await;
+        }
+        Ok(self.hits.clone())
+    }
+}
+
+/// Flip the token from a background task after a short delay so the pipeline
+/// is already awaiting the hanging stage when cancellation lands.
+fn spawn_cancel_flipper(cancel: &Arc<AtomicBool>) {
+    let token = Arc::clone(cancel);
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        token.store(true, Ordering::Relaxed);
+    });
+}
+
+async fn run_whole_block_with_sender(
+    db: &DbState,
+    sender: Arc<dyn CitationLlmSender>,
+    cancel: &Arc<AtomicBool>,
+) -> Result<Vec<CitationResult>, AppError> {
+    run_phase_c(
+        db,
+        SDIL_CLAIM,
+        CitationFinderMode::WholeBlock,
+        &["included".to_string()],
+        &sender,
+        cancel,
+        &|_p: CitationFinderProgress| {},
+    )
+    .await
+}
+
+/// Cancel during the classify call must interrupt it promptly (the pre-fix
+/// pipeline awaited the full HTTP call and never observed the token).
+#[tokio::test]
+async fn cancel_during_hanging_classification_returns_cancelled() {
+    let db = new_db();
+    seed_sdil_article(&db.conn.lock().expect("db"));
+    let cancel = Arc::new(AtomicBool::new(false));
+    spawn_cancel_flipper(&cancel);
+    let sender: Arc<dyn CitationLlmSender> =
+        Arc::new(CancelSender::hanging(HangStage::Classification));
+
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        run_whole_block_with_sender(&db, sender, &cancel),
+    )
+    .await
+    .expect("cancel must interrupt a hanging classification");
+
+    assert!(matches!(result, Err(AppError::Import(ref m)) if m == "Cancelled"), "got: {result:?}");
+}
+
+/// Cancel during the query-embedding recall must interrupt it promptly.
+#[tokio::test]
+async fn cancel_during_hanging_recall_returns_cancelled() {
+    let db = new_db();
+    seed_sdil_article(&db.conn.lock().expect("db"));
+    let cancel = Arc::new(AtomicBool::new(false));
+    spawn_cancel_flipper(&cancel);
+    let sender: Arc<dyn CitationLlmSender> = Arc::new(CancelSender::hanging(HangStage::Recall));
+
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        run_whole_block_with_sender(&db, sender, &cancel),
+    )
+    .await
+    .expect("cancel must interrupt a hanging recall");
+
+    assert!(matches!(result, Err(AppError::Import(ref m)) if m == "Cancelled"), "got: {result:?}");
+}
+
+/// A classification that returns after the user cancelled must still be
+/// discarded (no `citation:done` with results after a Cancel click).
+#[tokio::test]
+async fn cancel_after_completed_classification_returns_cancelled() {
+    let db = new_db();
+    seed_sdil_article(&db.conn.lock().expect("db"));
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut sender = CancelSender::hanging(HangStage::None);
+    sender.flip_cancel_on_classify = Some(Arc::clone(&cancel));
+
+    let result = run_whole_block_with_sender(&db, Arc::new(sender), &cancel).await;
+
+    assert!(matches!(result, Err(AppError::Import(ref m)) if m == "Cancelled"), "got: {result:?}");
 }

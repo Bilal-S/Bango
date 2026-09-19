@@ -9,6 +9,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use futures::FutureExt;
 use tauri::{Emitter, Manager, State};
 
 use crate::citation_finder::{CitationFinderMode, CitationFinderProgress, CitationFinderReadiness};
@@ -51,6 +52,48 @@ impl CitationFinderState {
     }
 }
 
+/// Begin a citation run under the shared progress lock.
+///
+/// Returns `Ok(Some(snapshot))` when a run is already active: the caller
+/// returns that snapshot and MUST NOT touch the cancel token (an extra Find
+/// click must never un-cancel the active search). Returns `Ok(None)` after
+/// resetting the token and marking the run as started.
+pub fn begin_citation_run(
+    progress: &Mutex<CitationFinderProgress>,
+    cancel: &AtomicBool,
+) -> Result<Option<CitationFinderProgress>, AppError> {
+    let Ok(mut prog) = progress.lock() else {
+        return Err(AppError::Import("Citation Finder mutex poisoned".to_string()));
+    };
+    if prog.is_running {
+        return Ok(Some(prog.clone()));
+    }
+    cancel.store(false, Ordering::Relaxed);
+    *prog = CitationFinderProgress {
+        phase: "searching".to_string(),
+        stage: None,
+        done: 0,
+        total: 0,
+        overall_percent: 0,
+        message: "Starting citation search…".to_string(),
+        is_running: true,
+        is_cancelled: false,
+        funnel: None,
+    };
+    Ok(None)
+}
+
+/// Human message from a caught panic payload (for the terminal event).
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic".to_string()
+    }
+}
+
 /// One-button entry. Returns immediately after spawning the background task;
 /// frontend tracks progress via events.
 #[tauri::command]
@@ -66,25 +109,8 @@ pub async fn find_citations(
      * and `is_running = true` reset MUST run under the same lock to close the
      * TOCTOU race where two rapid calls both pass the guard. */
     let cancel_handle = cf_state.cancel_handle();
-    cancel_handle.store(false, Ordering::Relaxed);
-    {
-        let Ok(mut prog) = cf_state.progress.lock() else {
-            return Err(AppError::Import("Citation Finder mutex poisoned".to_string()));
-        };
-        if prog.is_running {
-            return Ok(prog.clone());
-        }
-        *prog = CitationFinderProgress {
-            phase: "searching".to_string(),
-            stage: None,
-            done: 0,
-            total: 0,
-            overall_percent: 0,
-            message: "Starting citation search…".to_string(),
-            is_running: true,
-            is_cancelled: false,
-            funnel: None,
-        };
+    if let Some(snapshot) = begin_citation_run(&cf_state.progress, &cancel_handle)? {
+        return Ok(snapshot);
     }
 
     let progress = cf_state.progress_handle();
@@ -103,6 +129,7 @@ pub async fn find_citations(
     let text_for_task = text.clone();
     let statuses_for_task = status_filter.clone();
 
+    eprintln!("[citation] run start mode={mode:?} statuses={statuses_for_task:?}");
     tokio::task::spawn(async move {
         let db = app_handle_for_task.state::<DbState>();
         let progress_snapshot = Arc::clone(&progress_for_task);
@@ -116,7 +143,10 @@ pub async fn find_citations(
             let _ = app_handle_for_emit.emit("citation:progress", p);
         };
 
-        let result = find_citations_inner(
+        /* Panic-safe: a panic anywhere in the pipeline still produces a
+         * terminal `citation:error` and clears `is_running` below, so the UI
+         * can never wedge on "Classifying…" with the guard left closed. */
+        let result = std::panic::AssertUnwindSafe(find_citations_inner(
             &db,
             Arc::clone(&embedding_sender),
             Arc::clone(&llm_sender),
@@ -131,8 +161,17 @@ pub async fn find_citations(
                  * each into a citation:progress update). */
                 app_handle: Some(app_handle_for_task.clone()),
             },
-        )
+        ))
+        .catch_unwind()
         .await;
+        let result = match result {
+            Ok(result) => result,
+            Err(payload) => {
+                let message = panic_message(payload.as_ref());
+                eprintln!("[citation] run panic: {message}");
+                Err(AppError::Import(format!("Citation search crashed: {message}")))
+            }
+        };
 
         // Mark not-running in the snapshot regardless of outcome.
         if let Ok(mut guard) = progress_for_task.lock() {
@@ -144,6 +183,7 @@ pub async fn find_citations(
 
         match result {
             Ok(results) => {
+                eprintln!("[citation] run done");
                 let _ = app_handle_for_task.emit("citation:done", &results);
             }
             Err(e) => {
@@ -152,6 +192,7 @@ pub async fn find_citations(
                  * the only free-form String variant, not due to import errors. */
                 let raw = format!("{e}");
                 let msg = raw.strip_prefix("Import error: ").unwrap_or(&raw).to_string();
+                eprintln!("[citation] run error: {msg}");
                 let _ = app_handle_for_task.emit("citation:error", &msg);
             }
         }

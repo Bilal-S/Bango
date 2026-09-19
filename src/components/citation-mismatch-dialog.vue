@@ -4,17 +4,21 @@
  * embeddings were generated with a different model than the current
  * `embedding_model` setting (so recall would silently return zero hits).
  * Three options (emitted; the parent owns the follow-up):
- * - `regenerate` -> delete + re-embed the scope (background)
+ * - `regenerate` -> delete + re-embed the scope (live progress via the
+ *   `regeneratingProgress` prop)
  * - `continue`   -> proceed anyway with partial recall
  * - `cancel`     -> abort, no dismissal recorded
  */
-import type { EmbeddingModelMismatch } from '@/types/citation-finder';
+import type { CitationFinderProgress, EmbeddingModelMismatch } from '@/types/citation-finder';
 
 defineProps<{
   /** Active mismatch payload. The dialog renders while non-null. */
   mismatch: EmbeddingModelMismatch | null;
   /** True while the Regenerate action is dispatching (disables buttons). */
   regenerating: boolean;
+  /** Live regeneration progress (`embedding:progress`); null before the
+   *  first event or when not regenerating. */
+  regeneratingProgress: CitationFinderProgress | null;
 }>();
 
 const emit = defineEmits<{
@@ -51,6 +55,17 @@ const emit = defineEmits<{
             >. For consistent results, regenerate your embeddings ({{ mismatch.storedRowCount }}
             row(s) will be re-embedded). Otherwise Citation Finder may silently return zero matches.
           </p>
+          <div v-if="regeneratingProgress" class="mismatch-dialog__progress">
+            <span class="mismatch-dialog__progress-label">
+              {{ regeneratingProgress.message }}
+            </span>
+            <div class="mismatch-dialog__progress-track">
+              <div
+                class="mismatch-dialog__progress-fill"
+                :style="{ width: regeneratingProgress.overallPercent + '%' }"
+              ></div>
+            </div>
+          </div>
           <div class="mismatch-dialog__actions">
             <button
               type="button"
@@ -80,7 +95,7 @@ const emit = defineEmits<{
                 aria-label="Regenerating"
               ></span>
               <span v-else class="material-symbols-outlined text-[16px]">refresh</span>
-              {{ regenerating ? 'Starting…' : 'Regenerate' }}
+              {{ regenerating ? 'Regenerating…' : 'Regenerate' }}
             </button>
           </div>
         </div>
@@ -156,6 +171,31 @@ const emit = defineEmits<{
   justify-content: flex-end;
   margin-top: 0.25rem;
   flex-wrap: wrap;
+}
+
+.mismatch-dialog__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.mismatch-dialog__progress-label {
+  font-size: 0.75rem;
+  color: rgb(71 85 105); /* slate-600 */
+}
+
+.mismatch-dialog__progress-track {
+  height: 0.375rem;
+  border-radius: 9999px;
+  background: rgb(226 232 240); /* slate-200 */
+  overflow: hidden;
+}
+
+.mismatch-dialog__progress-fill {
+  height: 100%;
+  background: rgb(99 102 241); /* indigo-600 */
+  border-radius: 9999px;
+  transition: width 0.2s ease;
 }
 
 .mismatch-dialog__btn {
