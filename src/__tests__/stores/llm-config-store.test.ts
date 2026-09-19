@@ -258,3 +258,64 @@ describe('useLlmConfigStore', () => {
     });
   });
 });
+
+/* T6/T7 backend-aware store behavior. */
+function mockCommandMap(map: Record<string, unknown>) {
+  vi.mocked(tauriCommand).mockImplementation((async (command: string) => map[command]) as never);
+}
+
+describe('backend-aware configuration', () => {
+  it('is_configured_is_backend_aware', async () => {
+    const store = useLlmConfigStore();
+    mockCommandMap({
+      get_llm_config: null,
+      get_llm_backend: 'bango_ai',
+      get_bango_ai_status: { state: 'ready', supportedTarget: true },
+    });
+    await store.fetch();
+    expect(store.backend).toBe('bango_ai');
+    expect(store.isConfigured).toBe(true);
+
+    store.invalidate();
+    mockCommandMap({
+      get_llm_config: null,
+      get_llm_backend: 'bango_ai',
+      get_bango_ai_status: { state: 'not_installed', supportedTarget: true },
+    });
+    await store.fetch();
+    expect(store.isConfigured).toBe(false);
+
+    store.invalidate();
+    mockCommandMap({
+      get_llm_config: null,
+      get_llm_backend: 'configured_provider',
+      get_bango_ai_status: { state: 'ready', supportedTarget: true },
+    });
+    await store.fetch();
+    expect(store.isConfigured).toBe(false);
+  });
+
+  it('refresh_backend_state_unlocks_after_local_ready', async () => {
+    // First fetch: configured_provider, unconfigured cloud row -> locked.
+    const store = useLlmConfigStore();
+    mockCommandMap({
+      get_llm_config: null,
+      get_llm_backend: 'configured_provider',
+      get_bango_ai_status: { state: 'not_installed', supportedTarget: true },
+    });
+    await store.fetch();
+    expect(store.isConfigured).toBe(false);
+
+    // Install completes + activates: the refresh unlocks the canonical gate
+    // with no re-init and no app restart (aifixes1 F16).
+    mockCommandMap({
+      get_llm_config: null,
+      get_llm_backend: 'bango_ai',
+      get_bango_ai_status: { state: 'ready', supportedTarget: true },
+    });
+    await store.refreshBackendState();
+    expect(store.backend).toBe('bango_ai');
+    expect(store.localReady).toBe(true);
+    expect(store.isConfigured).toBe(true);
+  });
+});

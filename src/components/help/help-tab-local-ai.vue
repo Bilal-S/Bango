@@ -161,6 +161,11 @@ const localAiGuides: LocalAIGuide[] = [
     title: 'Why Run LLMs Locally?',
     intro:
       'Running models on your own hardware means your data never leaves your machine - full privacy, no API fees, offline capability, and predictable performance. Tools like Ollama and llama.cpp make it straightforward to deploy models on laptops, workstations, or servers.',
+    steps: [
+      {
+        text: 'Bango also has a built-in option: choose "Bango AI" at the top of the AI Provider settings and Bango downloads and runs a local model for you. See the Bango AI help page for details.',
+      },
+    ],
   },
   {
     icon: 'memory',

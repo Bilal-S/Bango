@@ -1,5 +1,6 @@
 pub mod app_settings;
 pub mod articles;
+pub mod bango_ai;
 pub mod biblio_cmd;
 pub mod chat;
 pub mod citation_finder;

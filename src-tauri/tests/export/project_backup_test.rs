@@ -1528,3 +1528,28 @@ fn import_reference_papers_dedups_case_variant_doi() {
         .expect("query link");
     assert_eq!(linked_paper_id, "rp-survivor", "case-variant dupe id must remap to survivor");
 }
+
+// Backup cloud-triple restore precedence keys on `has_config`, never on
+// `llm_backend`: a bango_ai selection neither blocks the backup triple from
+// restoring onto an unconfigured machine nor changes the portable-selection
+// semantics (the machine's backend row survives an import without one).
+#[test]
+fn cloud_row_restore_precedence_ignores_llm_backend() {
+    let conn = setup_db();
+    app_settings_repo::set_llm_backend(&conn, bango_lib::llm::backend::LlmBackend::BangoAi)
+        .expect("select bango_ai");
+
+    // Unconfigured machine: the backup triple wins regardless of the backend.
+    let backup = backup_with_llm_config("openai", "https://api.openai.com/v1", "gpt-4o-mini");
+    import_project(&conn, &backup).expect("import should succeed");
+    let model: String = conn
+        .query_row("SELECT model_name FROM llm_config WHERE id = 1", [], |r| r.get(0))
+        .expect("backup triple restored");
+    assert_eq!(model, "gpt-4o-mini");
+
+    // The machine's backend selection is untouched by a backup without one.
+    assert_eq!(
+        app_settings_repo::get_llm_backend(&conn).expect("backend"),
+        bango_lib::llm::backend::LlmBackend::BangoAi
+    );
+}

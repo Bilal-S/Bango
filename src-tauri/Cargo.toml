@@ -72,6 +72,7 @@ tar = "0.4"
  chardetng = "0.1"
  zip = "2"
 fs4 = "1.1.0"
+sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 
 [dev-dependencies]
 mockito = "1"

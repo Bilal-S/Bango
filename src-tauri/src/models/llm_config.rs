@@ -26,6 +26,11 @@ pub enum LlmProvider {
     Ollama,
     LmStudio,
     Custom,
+    /// Runtime-only provider for the Bango AI effective config (T6). Never
+    /// persisted: `llm_config_repo::save_config` rejects it and
+    /// `parse_provider` never produces it, so the DB CHECK constraint is
+    /// untouched.
+    BangoAi,
 }
 
 impl LlmProvider {
@@ -41,6 +46,7 @@ impl LlmProvider {
             Self::Ollama => "ollama",
             Self::LmStudio => "lm_studio",
             Self::Custom => "custom",
+            Self::BangoAi => "bango_ai",
         }
     }
 }

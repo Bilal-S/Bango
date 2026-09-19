@@ -8,7 +8,6 @@ use crate::db::article_repo;
 use crate::db::chunk_repo;
 use crate::db::connection::DbState;
 use crate::db::criteria_repo;
-use crate::db::llm_config_repo;
 use crate::error::AppError;
 use crate::llm::orchestrator::LlmOrchestrator;
 use crate::screening::engine::{
@@ -64,7 +63,7 @@ pub async fn get_screening_readiness(
     let has_aims = criteria_repo::has_any_aims(&conn)?;
     let has_inclusion = criteria_repo::has_inclusion_criteria(&conn)?;
     let has_exclusion = criteria_repo::has_exclusion_criteria(&conn)?;
-    let has_llm_config = llm_config_repo::has_config(&conn)?;
+    let has_llm_config = crate::llm::readiness::has_usable_llm(&conn)?;
 
     let (total_working, total_unscreened, token_warning) = if !has_aims
         || !has_inclusion
@@ -78,7 +77,7 @@ pub async fn get_screening_readiness(
         let total_unscreened = article_repo::count_unscreened_working(&conn)?;
 
         let token_warning = if total_unscreened > 0 {
-            let llm_config = llm_config_repo::get_config_no_decrypt(&conn)?
+            let llm_config = crate::llm::effective_config::resolve_no_decrypt(&conn)?
                 .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
 
             // Tier 3 Gap 5: mode-aware worst-case footprint per §4.3.
@@ -149,7 +148,7 @@ pub async fn start_screening(
 
     let config = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        llm_config_repo::get_config(&conn)?.ok_or_else(|| {
+        crate::llm::effective_config::resolve(&conn)?.ok_or_else(|| {
             AppError::Validation(
                 "LLM not configured. Please set up LLM configuration first.".to_string(),
             )
@@ -409,7 +408,7 @@ pub fn reset_working_list(db_state: State<'_, DbState>) -> Result<usize, AppErro
 pub fn estimate_screening_tokens(db_state: State<'_, DbState>) -> Result<Option<String>, AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
-    let config = llm_config_repo::get_config_no_decrypt(&conn)?
+    let config = crate::llm::effective_config::resolve_no_decrypt(&conn)?
         .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
 
     let max_len = article_repo::max_article_char_len(&conn)?;
@@ -596,7 +595,7 @@ pub async fn screen_article(
 
     let config = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        llm_config_repo::get_config(&conn)?.ok_or_else(|| {
+        crate::llm::effective_config::resolve(&conn)?.ok_or_else(|| {
             AppError::Validation(
                 "LLM not configured. Please set up LLM configuration first.".to_string(),
             )

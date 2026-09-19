@@ -1,4 +1,5 @@
 //! Area test binary: db
+mod app_settings_llm_backend_test;
 mod article_delete_test;
 mod article_get_by_ids_test;
 mod article_metadata_test;

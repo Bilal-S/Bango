@@ -13,6 +13,9 @@ fn split_prompt_contains_text() {
     assert!(prompt.contains("Sugar taxes reduce obesity."));
     assert!(prompt.contains("at most 5"));
     assert!(prompt.contains("JSON array of strings"));
+    // The local json_object grammar cannot emit a bare array, so the prompt
+    // requests an object with a "claims" wrapper the parser can unwrap.
+    assert!(prompt.contains("claims"), "must name the claims wrapper key");
 }
 
 #[test]

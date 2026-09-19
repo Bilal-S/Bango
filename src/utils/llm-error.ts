@@ -27,6 +27,16 @@ interface TroubleshootData {
 /** Known error patterns → troubleshooting data */
 const ERROR_PATTERNS: Array<{ pattern: RegExp; data: TroubleshootData }> = [
   {
+    pattern: /Bango AI could not fit this prompt in the selected context/i,
+    data: {
+      anchorId: 'bango-ai-context-overflow',
+      cause:
+        'The prompt (article text, evidence, or chat history) is larger than the context window the local Bango AI engine was started with.',
+      solution:
+        'Open Settings, choose Bango AI, and raise the Context setting under Advanced (8k to 64k), or shorten the text (fewer evidence chunks, shorter chat history). The change applies after Bango AI restarts.',
+    },
+  },
+  {
     pattern: /not supported for the API use/i,
     data: {
       anchorId: 'location-not-supported',

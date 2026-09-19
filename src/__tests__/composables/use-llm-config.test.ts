@@ -255,10 +255,9 @@ describe('useLlmConfig', () => {
       await vi.advanceTimersByTimeAsync(400); // would have fired if not reset
       expect(tauriCommand).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(200); // 600ms since the second schedule
-      // The save fires exactly once (debounce reset worked). The re-fetch
-      // also fires once, so the total IPC call count is 2. Assert on the
-      // save command specifically to make the intent clear.
-      expect(tauriCommand).toHaveBeenCalledTimes(2);
+      // The save fires exactly once (debounce reset worked). The post-save
+      // re-fetch adds backend/status reads, so assert on the save command
+      // specifically to make the intent clear.
       expect(
         vi.mocked(tauriCommand).mock.calls.filter(([cmd]) => cmd === 'save_llm_config')
       ).toHaveLength(1);

@@ -1,28 +1,30 @@
-//! Artifact path resolution for Bango Local embeddings (pure; no I/O).
+//! Shared AI artifact path resolution (pure; no I/O).
 //!
-//! Model files normally live under `{storage_root}/model/` so they follow the
-//! user's Bango documents directory. When that directory is OneDrive-synced
+//! Model payloads normally live under `{storage_root}/model/` so they follow
+//! the user's Bango documents directory. When that directory is OneDrive-synced
 //! (Windows Known Folder backup), large binary artifacts churn sync quota,
 //! hit file locks during atomic renames, and can be dehydrated to cloud-only
 //! placeholders - breaking the offline guarantee. In that case the model root
-//! falls back to the OS local-app-data dir. The ONNX Runtime library always
-//! lives in local app data: it is a redownloadable binary cache, never user
-//! data.
+//! falls back to the OS local-app-data dir. Runtime libraries always live in
+//! local app data: they are redownloadable binary caches, never user data.
+//!
+//! Moved here from `embedding::local::paths` in T2 so Bango Local embeddings
+//! and Bango AI share one implementation.
 
 use std::path::{Path, PathBuf};
 
-/// Subdirectory under the storage root holding local embedding models.
+/// Subdirectory under the storage root holding local model payloads.
 pub const MODEL_DIR_NAME: &str = "model";
 
 /// App-data subdirectory for Bango AI artifacts (fallback model store + runtimes).
 pub const AI_DIR_NAME: &str = "ai";
 
-/// Resolved artifact roots for the local embedding backend.
+/// Resolved artifact roots for a local AI backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AiPaths {
     /// Root for model payloads (`<model_root>/<profile>/...`).
     pub model_root: PathBuf,
-    /// Root for the ONNX Runtime library (versioned subdirectories).
+    /// Root for downloaded runtime libraries (versioned subdirectories).
     pub runtime_root: PathBuf,
     /// Whether the model root fell back to app data (OneDrive detected).
     pub used_fallback: bool,
@@ -67,9 +69,19 @@ pub fn resolve_ai_paths_with_base(storage_root: &Path, data_local: Option<&Path>
 }
 
 /// Resolve artifact roots using this machine's actual local-app-data dir.
+/// Debug builds honor the test-only `BANGO_TEST_DATA_LOCAL_DIR` env knob so
+/// integration tests can redirect runtime artifacts to a temp dir.
 #[must_use]
 pub fn resolve_ai_paths(storage_root: &Path) -> AiPaths {
-    resolve_ai_paths_with_base(storage_root, dirs::data_local_dir().as_deref())
+    resolve_ai_paths_with_base(storage_root, local_data_base().as_deref())
+}
+
+fn local_data_base() -> Option<PathBuf> {
+    #[cfg(debug_assertions)]
+    if let Some(dir) = std::env::var_os("BANGO_TEST_DATA_LOCAL_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+    dirs::data_local_dir()
 }
 
 #[cfg(test)]

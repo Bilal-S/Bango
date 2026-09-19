@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # check-test-inventory.sh - §5.0 Mechanism B: machine-checkable Test Inventory.
 #
-# Parses the binding `file::function` test identifiers from the fenced inventory
-# tables in `.worktrees/chunkingplan.md` AND `.worktrees/tier4-plan.md`, and
+# Parses the binding `file::function` test identifiers from the inventory
+# tables in every plan doc registered in `PLAN_DOCS` below, and
 # greps the named test files to confirm each listed test exists. Fails (exit 1)
 # if any listed test is missing from its file.
 #
@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-PLAN_DOCS=(docs/test-plans/language-plan-v2-tests.md docs/test-plans/translation-3-tests.md docs/test-plans/search-strategy-tests.md docs/test-plans/criteria-generation-tests.md docs/test-plans/openalex-tests.md docs/test-plans/exim-tests.md docs/test-plans/import-plan-tests.md docs/test-plans/refactor3-tests.md docs/test-plans/refactor5-tests.md docs/test-plans/citation-finder-tests.md docs/test-plans/embedding-probe-persist-tests.md docs/test-plans/local-embeddings-tests.md docs/test-plans/tags-merge-tests.md docs/test-plans/wiki-ingest-freeze-tests.md docs/test-plans/wiki-output-budget-tests.md docs/test-plans/wiki-author-enrichment-tests.md docs/test-plans/wiki-frameworks-tests.md docs/test-plans/refactor1-tests.md docs/test-plans/cluster-themes-tests.md docs/test-plans/chunk-rebuild-tests.md docs/test-plans/doi-case-tests.md docs/test-plans/zotero-tests.md docs/test-plans/wiki-export-tests.md)
+PLAN_DOCS=(docs/test-plans/language-plan-v2-tests.md docs/test-plans/translation-3-tests.md docs/test-plans/search-strategy-tests.md docs/test-plans/criteria-generation-tests.md docs/test-plans/openalex-tests.md docs/test-plans/exim-tests.md docs/test-plans/import-plan-tests.md docs/test-plans/refactor3-tests.md docs/test-plans/refactor5-tests.md docs/test-plans/citation-finder-tests.md docs/test-plans/embedding-probe-persist-tests.md docs/test-plans/local-embeddings-tests.md docs/test-plans/tags-merge-tests.md docs/test-plans/wiki-ingest-freeze-tests.md docs/test-plans/wiki-output-budget-tests.md docs/test-plans/wiki-author-enrichment-tests.md docs/test-plans/wiki-frameworks-tests.md docs/test-plans/refactor1-tests.md docs/test-plans/cluster-themes-tests.md docs/test-plans/chunk-rebuild-tests.md docs/test-plans/doi-case-tests.md docs/test-plans/zotero-tests.md docs/test-plans/wiki-export-tests.md docs/test-plans/bango-ai-tests.md)
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 

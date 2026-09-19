@@ -120,3 +120,19 @@ describe('help-tab-reference.vue - Embeddings section', () => {
     expect(text).toContain('the embedding step only');
   });
 });
+
+/* Bango AI reference section (T7). */
+describe('Bango AI reference section', () => {
+  it('renders_bango_ai_section_below_embeddings', () => {
+    const wrapper = mountReference();
+    const ids = wrapper.findAll('section.ref-section').map((s) => s.attributes('id'));
+    expect(ids).toContain('ref-bango-ai');
+    expect(ids.indexOf('ref-embeddings')).toBeGreaterThan(-1);
+    expect(ids.indexOf('ref-embeddings')).toBeLessThan(ids.indexOf('ref-bango-ai'));
+    expect(navIndex(wrapper, 'Embeddings')).toBeLessThan(navIndex(wrapper, 'Bango AI'));
+    const text = wrapper.find('#ref-bango-ai').text();
+    expect(text).toContain('Bango AI');
+    expect(text).toContain('on your own computer');
+    expect(text).toContain('Configured Provider');
+  });
+});

@@ -70,7 +70,7 @@ async fn wiki_ingest_inner(
     // wiki backbone.
     let skip_llm = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        let has_llm = crate::db::llm_config_repo::has_config(&conn)?;
+        let has_llm = crate::llm::readiness::has_usable_llm(&conn)?;
         if !has_llm {
             let _ = crate::db::audit_repo::log_error(
                 &conn,
@@ -85,7 +85,7 @@ async fn wiki_ingest_inner(
     let (root, config) = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let root = storage::resolve_root(&conn)?;
-        let config = crate::db::llm_config_repo::get_config(&conn)?.ok_or_else(|| {
+        let config = crate::llm::effective_config::resolve(&conn)?.ok_or_else(|| {
             AppError::Validation(
                 "LLM not configured. Please set up LLM configuration first.".to_string(),
             )
@@ -300,7 +300,7 @@ async fn ensure_wiki_frameworks(
 ) -> Result<(), AppError> {
     let config = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        crate::db::llm_config_repo::get_config(&conn)?
+        crate::llm::effective_config::resolve(&conn)?
     };
     let Some(config) = config else { return Ok(()) };
 
@@ -685,7 +685,7 @@ async fn wiki_rebuild_inner(
     // When not, deterministic pre-seed still runs; only LLM batches are skipped.
     let skip_llm = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        let has_llm = crate::db::llm_config_repo::has_config(&conn)?;
+        let has_llm = crate::llm::readiness::has_usable_llm(&conn)?;
         if !has_llm {
             let _ = crate::db::audit_repo::log_error(
                 &conn,
@@ -723,7 +723,7 @@ async fn wiki_rebuild_inner(
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let root = storage::resolve_root(&conn)?;
         let articles = raw_export::load_included_articles(&conn)?;
-        let config = crate::db::llm_config_repo::get_config(&conn)?.ok_or_else(|| {
+        let config = crate::llm::effective_config::resolve(&conn)?.ok_or_else(|| {
             AppError::Validation(
                 "LLM not configured. Please set up LLM configuration first.".to_string(),
             )
@@ -858,7 +858,7 @@ async fn wiki_export_and_ingest_inner(
     // When not, deterministic pre-seed still runs; only LLM batches are skipped.
     let skip_llm = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        let has_llm = crate::db::llm_config_repo::has_config(&conn)?;
+        let has_llm = crate::llm::readiness::has_usable_llm(&conn)?;
         if !has_llm {
             let _ = crate::db::audit_repo::log_error(
                 &conn,
@@ -887,7 +887,7 @@ async fn wiki_export_and_ingest_inner(
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let root = storage::resolve_root(&conn)?;
         let articles = raw_export::load_included_articles(&conn)?;
-        let config = crate::db::llm_config_repo::get_config(&conn)?.ok_or_else(|| {
+        let config = crate::llm::effective_config::resolve(&conn)?.ok_or_else(|| {
             AppError::Validation(
                 "LLM not configured. Please set up LLM configuration first.".to_string(),
             )

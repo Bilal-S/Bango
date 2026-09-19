@@ -17,6 +17,7 @@ pub mod embedding;
 pub mod error;
 pub mod export;
 pub mod llm;
+pub mod local_ai;
 pub mod models;
 pub mod openalex;
 pub mod prisma;
@@ -145,6 +146,8 @@ pub fn run() {
         .manage(WikiIngestState::default())
         .manage(std::sync::Arc::new(embedding::local::engine::LocalEngine::new()))
         .manage(commands::local_embeddings::LocalEmbeddingsInstallState::default())
+        .manage(std::sync::Arc::new(llm::local::engine::BangoAiEngine::new()))
+        .manage(commands::bango_ai::BangoAiInstallState::default())
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
             commands::startup::get_startup_status,
@@ -372,15 +375,37 @@ pub fn run() {
             commands::local_embeddings::remove_local_embeddings,
             commands::local_embeddings::get_embedding_backend,
             commands::local_embeddings::set_embedding_backend,
+            commands::bango_ai::get_bango_ai_status,
+            commands::bango_ai::install_bango_ai,
+            commands::bango_ai::cancel_bango_ai_install,
+            commands::bango_ai::verify_bango_ai,
+            commands::bango_ai::remove_bango_ai,
+            commands::bango_ai::test_bango_ai,
+            commands::bango_ai::get_llm_backend,
+            commands::bango_ai::set_llm_backend,
+            commands::bango_ai::get_bango_ai_settings,
+            commands::bango_ai::set_bango_ai_settings,
         ]);
 
     #[cfg(debug_assertions)]
     let builder = builder.plugin(tauri_plugin_pilot::init());
 
-    if let Err(e) = builder.run(tauri::generate_context!()) {
-        eprintln!("fatal: {e:#}");
-        std::process::exit(1);
-    }
+    let app = match builder.build(tauri::generate_context!()) {
+        Ok(app) => app,
+        Err(e) => {
+            eprintln!("fatal: {e:#}");
+            std::process::exit(1);
+        }
+    };
+    app.run(|app_handle, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            if let Some(engine) =
+                app_handle.try_state::<std::sync::Arc<llm::local::engine::BangoAiEngine>>()
+            {
+                engine.kill_blocking();
+            }
+        }
+    });
 }
 
 /// `TemperatureFlagPersister` backed by `AppHandle`. Persists `skip_temperature`
@@ -477,30 +502,81 @@ fn init_background_state(handle: &tauri::AppHandle) {
         }
     }
 
-    // LLM orchestrator from saved config (defaults: max_conc=3, delay=500ms).
-    let (max_conc, delay_ms) = {
+    // LLM orchestrator from the saved config + active generation backend.
+    let (max_conc, delay_ms, backend, storage_root) = {
         let db = handle.state::<DbState>();
         let result = db::connection::lock_conn(&db.conn);
         match result {
-            Ok(conn) => match crate::db::llm_config_repo::get_config(&conn) {
-                Ok(Some(cfg)) => {
-                    (cfg.max_concurrent_requests as usize, cfg.request_delay_ms as u64)
-                }
-                _ => (3, 500), // defaults
-            },
+            Ok(conn) => {
+                let backend = crate::db::app_settings_repo::get_llm_backend(&conn)
+                    .unwrap_or(crate::llm::backend::LlmBackend::ConfiguredProvider);
+                let stored = crate::db::llm_config_repo::get_config(&conn).ok().flatten();
+                let root = crate::db::app_settings_repo::get_storage_root(&conn).ok();
+                let local = backend == crate::llm::backend::LlmBackend::BangoAi;
+                let max = if local {
+                    1
+                } else {
+                    stored.as_ref().map_or(3, |c| c.max_concurrent_requests.max(1) as usize)
+                };
+                let delay = if local {
+                    0
+                } else {
+                    stored.as_ref().map_or(500, |c| c.request_delay_ms.max(0) as u64)
+                };
+                (max, delay, backend, root)
+            }
             Err(e) => {
                 eprintln!("warning: failed to lock DB for LLM config: {e:#}");
-                (3, 500)
+                (3, 500, crate::llm::backend::LlmBackend::ConfiguredProvider, None)
             }
         }
     };
     let orchestrator = std::sync::Arc::new(LlmOrchestrator::new(max_conc, delay_ms));
+    orchestrator.set_backend_initial(backend);
+
+    // Seed the engine with the persisted (or RAM-recommended) settings so the
+    // status panel, the resolver, and the spawned server's --ctx-size agree
+    // from startup, including after a restart.
+    {
+        let engine = handle
+            .state::<std::sync::Arc<crate::llm::local::engine::BangoAiEngine>>()
+            .inner()
+            .clone();
+        let db = handle.state::<DbState>();
+        if let Ok(settings) = db::connection::lock_conn(&db.conn)
+            .and_then(|conn| db::app_settings_repo::get_bango_ai_settings(&conn))
+        {
+            let _ = engine.update_settings(settings);
+        }
+    }
 
     // Wire best-effort `skip_temperature` persister so the LLM client can
     // persist the recovery flag after a temperature-rejection 400.
     orchestrator.set_temperature_persister(std::sync::Arc::new(AppHandleTemperaturePersister {
         handle: handle.clone(),
     }));
+
+    // Wire the live Bango AI config provider when a storage root exists.
+    if let Some(root) = storage_root {
+        if let Ok(manifest) = crate::llm::local::manifest::local_manifest() {
+            let engine = handle
+                .state::<std::sync::Arc<crate::llm::local::engine::BangoAiEngine>>()
+                .inner()
+                .clone();
+            let paths = crate::local_ai::paths::resolve_ai_paths(std::path::Path::new(&root));
+            let spec = crate::llm::local::engine::ServerSpec {
+                binary: crate::llm::local::install::server_path(
+                    &paths.runtime_root,
+                    &manifest.runtime.version,
+                ),
+                model: crate::llm::local::engine::model_path(&paths.model_root),
+                log: commands::bango_ai::log_path(&paths),
+            };
+            orchestrator.set_local_config_provider(std::sync::Arc::new(
+                crate::llm::local::engine::EngineLocalConfigProvider::new(engine, spec),
+            ));
+        }
+    }
 
     handle.manage(orchestrator);
 

@@ -36,12 +36,17 @@ readiness) MUST read `useLlmConfigured()` (from
 - The Pinia store (`src/stores/llm-config.ts`) is the single source of truth.
   Its `isConfigured` computed mirrors the backend
   `llm_config_repo::has_config` contract (initialized + endpoint + model +
-  (local-provider OR API key)). `useLlmConfigStore` keeps the
+  (local-provider OR API key)) **under `configured_provider`**; under the
+  `bango_ai` generation backend it is the Bango AI component readiness instead
+  (`get_bango_ai_status.state === 'ready'` + supported target), loaded
+  best-effort in `fetch()` and re-read by `refreshBackendState()` (called on
+  terminal install events + backend switches so the gate never needs a
+  restart). `useLlmConfigStore` keeps the
   `LOCAL_PROVIDERS` set store-private and exports only the
   `isLocalProvider(provider)` predicate, so the local-provider set has exactly
   one frontend definition (mirrors the backend Rust `is_local` match).
 - The `has_llm_config` Tauri command stays registered (the screening
-  `get_screening_readiness` composite still calls `has_config` server-side),
+  `get_screening_readiness` composite calls `has_usable_llm` server-side),
   but NO frontend caller may invoke it directly. The one exception is
   `screening-progress.vue`, which ANDs the backend composite
   `readiness.hasLlmConfig` with `useLlmConfigured()` so the Start button +

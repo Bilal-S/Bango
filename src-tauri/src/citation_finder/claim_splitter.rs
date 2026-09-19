@@ -14,7 +14,8 @@ to cite individually.";
 /// Build the user prompt for the claim-splitting call.
 ///
 /// Pure `#[must_use]`. The caller passes the pasted text; the LLM returns a
-/// JSON array of strings.
+/// JSON object whose `claims` key holds the array of claim strings (the local
+/// `json_object` grammar cannot emit a bare array).
 #[must_use]
 pub fn build_claim_splitter_prompt(text: &str) -> String {
     format!(
@@ -22,7 +23,8 @@ pub fn build_claim_splitter_prompt(text: &str) -> String {
          self-contained statement. Return at most 5 claims. If the text contains fewer than 5\n\
          distinct claims, return only the ones that exist.\n\n\
          Text: \"{text}\"\n\n\
-         Return a JSON array of strings: [\"claim 1\", \"claim 2\", ...]"
+         Return a JSON object with a single top-level \"claims\" key whose value is a\n\
+         JSON array of strings: {{\"claims\": [\"claim 1\", \"claim 2\", ...]}}"
     )
 }
 

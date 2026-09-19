@@ -6,7 +6,6 @@ use std::sync::Arc;
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
 use crate::db::criteria_repo;
-use crate::db::llm_config_repo;
 use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::models::criterion::{Criterion, ResearchAim};
@@ -134,7 +133,7 @@ pub async fn generate_criteria(
 
     let (config, aims, opposite_criteria) = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        let config = llm_config_repo::get_config(&conn)?
+        let config = crate::llm::effective_config::resolve(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
         let aims = criteria_repo::get_all_aims(&conn)?;
         if aims.is_empty() {
@@ -443,7 +442,7 @@ pub async fn critique_criteria(
 
     let (config, aims, existing_criteria) = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        let config = llm_config_repo::get_config(&conn)?
+        let config = crate::llm::effective_config::resolve(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
         let aims = criteria_repo::get_all_aims(&conn)?;
         if aims.is_empty() {
@@ -540,7 +539,7 @@ pub async fn check_rules(
 ) -> Result<CheckRulesResult, AppError> {
     let (config, aims, inclusion_criteria, exclusion_criteria, custom_logic) = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        let config = llm_config_repo::get_config(&conn)?
+        let config = crate::llm::effective_config::resolve(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
         let aims = criteria_repo::get_all_aims(&conn)?;
         if aims.is_empty() {

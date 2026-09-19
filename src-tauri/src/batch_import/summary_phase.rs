@@ -16,7 +16,6 @@ use tauri::{Emitter, Manager, State};
 use crate::commands::summary::generate_article_ai_summary_inner;
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
-use crate::db::llm_config_repo;
 use crate::llm::orchestrator::LlmOrchestrator;
 
 use super::BatchImportPhaseResult;
@@ -150,7 +149,7 @@ pub fn llm_configured_with_audit(db_state: &State<'_, DbState>) -> bool {
         Ok(c) => c,
         Err(_) => return false, // lock-error surfaced by caller's skip message
     };
-    if llm_config_repo::has_config(&conn).unwrap_or(false) {
+    if crate::llm::readiness::has_usable_llm(&conn).unwrap_or(false) {
         return true;
     }
     let audit_detail = "Batch import Phase 4 (AI Summaries) skipped: LLM not \

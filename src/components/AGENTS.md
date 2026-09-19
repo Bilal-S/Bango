@@ -212,7 +212,19 @@ navigation never loses the edit),
 [localStorage `bango-full-text-summaries`], section-summaries [localStorage
 `bango-section-summaries`], auto-translate [DB-backed
 `app_settings.auto_translate`]),
-`settings-embeddings.vue` (the Embeddings card, mounted directly under the
+`settings-ai-section.vue` (Provider-section wrapper: radio-style
+"Choose how Bango runs AI" header - Configured Provider vs Bango AI - that
+replaces the provider configuration with the Bango AI panel while Bango AI is
+selected or installing (the provider card returns the moment Configured
+Provider is selected); choosing Bango AI before components are ready opens
+`bango-ai-consent-dialog.vue`, and activation persists only after the
+install self-test), `settings-bango-ai-card.vue` (Bango AI panel: status +
+busy note, stage-labelled monotonic progress with Cancel, set-up pitch with
+download/disk/memory lines and warning reasons, unsupported blocked state
+with no cloud-fallback wording, Test Bango AI timings, Advanced
+context/threads/reasoning, Verify Installation + two-step Remove with the
+same verified/delete icons as the Embeddings card, collapsed Component
+Details), `settings-embeddings.vue` (the Embeddings card, mounted directly under the
 provider card: "Embedding Provider" radio - Configured Provider vs Bango
 Local - where selecting Bango Local before a healthy install opens
 `embeddings-consent-dialog.vue` first (what runs locally, download size from

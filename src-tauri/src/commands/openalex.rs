@@ -10,7 +10,6 @@ use crate::db::app_settings_repo;
 use crate::db::article_repo;
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
-use crate::db::llm_config_repo;
 use crate::db::reference_repo;
 use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
@@ -309,7 +308,7 @@ pub async fn import_openalex_articles(
                         if auto_summarize {
                             let llm_config = {
                                 let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-                                crate::db::llm_config_repo::get_config(&conn)?
+                                crate::llm::effective_config::resolve(&conn)?
                             };
                             if llm_config.is_some() {
                                 match crate::commands::summary::generate_article_ai_summary_inner(
@@ -513,7 +512,7 @@ pub async fn smart_search_openalex(
 ) -> Result<SmartSearchQuery, AppError> {
     let (config, aims, inclusion, exclusion) = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        let config = llm_config_repo::get_config(&conn)?
+        let config = crate::llm::effective_config::resolve(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
         let (aims, inclusion, exclusion) = smart_search::read_aims_and_criteria(&conn)?;
         (config, aims, inclusion, exclusion)

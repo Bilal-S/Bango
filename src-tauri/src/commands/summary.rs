@@ -8,7 +8,6 @@ use crate::db::biblio_repo;
 use crate::db::connection::DbState;
 use crate::db::criteria_repo;
 use crate::db::gap_analysis_repo;
-use crate::db::llm_config_repo;
 use crate::db::summary_repo;
 use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
@@ -67,7 +66,7 @@ pub async fn generate_summary(
     let summary_input = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
-        let config = llm_config_repo::get_config(&conn)?
+        let config = crate::llm::effective_config::resolve(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
         let aim_list = criteria_repo::get_all_aims(&conn)?;
         let aim_texts: Vec<String> = aim_list.iter().map(|a| a.text.clone()).collect();
@@ -255,7 +254,7 @@ pub async fn generate_article_ai_summary_inner(
     let (title, full_text, config) = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let (t, ft) = article_repo::get_full_text_for_summary(&conn, article_id)?;
-        let cfg = llm_config_repo::get_config(&conn)?
+        let cfg = crate::llm::effective_config::resolve(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
         (t, ft, cfg)
     }; // conn lock released
@@ -527,7 +526,7 @@ pub async fn generate_figure_descriptions(
             )
             .ok()
             .flatten();
-        let cfg = llm_config_repo::get_config(&conn)?
+        let cfg = crate::llm::effective_config::resolve(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
         (t, ft, existing, cfg)
     }; // conn lock released
@@ -671,7 +670,7 @@ pub async fn generate_unified_summary(
             )
             .ok()
             .flatten();
-        let cfg = llm_config_repo::get_config(&conn)?
+        let cfg = crate::llm::effective_config::resolve(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
         (t, ft, existing, cfg)
     }; // conn lock released
@@ -991,7 +990,7 @@ pub async fn analyze_research_gaps(
     let gap_input = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
-        let config = llm_config_repo::get_config(&conn)?
+        let config = crate::llm::effective_config::resolve(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
         let aim_list = criteria_repo::get_all_aims(&conn)?;
         let aim_texts: Vec<String> = aim_list.iter().map(|a| a.text.clone()).collect();

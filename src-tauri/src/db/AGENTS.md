@@ -106,6 +106,13 @@ Holds:
   restored `bango_local` without components hits the contextual install
   prompt). Consumed by `embedding::service::EmbeddingService` and read in
   `embedding::recall`'s lock burst.)
+- `llm_backend` (which backend serves generation calls: `configured_provider`
+  default | `bango_ai` on-device. The `LlmBackend` domain type lives in
+  `llm::backend` (leaf module); `parse` falls back to the default on
+  absent/garbage. **IN `PROJECT_PORTABLE_SETTINGS`**; readiness stays
+  machine-evaluated. Engine settings `bango_ai_context`,
+  `bango_ai_threads`, and `bango_ai_reasoning` are machine-local by design
+  and must NOT join the portable list.)
 - `project_name` (optional plaintext, up to `PROJECT_NAME_MAX_LEN = 60` chars;
   user-editable Dashboard title. `set_project_name` trims + hard-caps via
   `chars().take(50)`; empty/whitespace-only stores NULL. **Included in

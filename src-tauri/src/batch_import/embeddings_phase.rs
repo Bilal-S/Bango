@@ -23,7 +23,6 @@ use tauri::{Emitter, State};
 use crate::db::app_settings_repo;
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
-use crate::db::llm_config_repo;
 use crate::embedding::director::EmbeddingScope;
 use crate::embedding::runner::{generate_embeddings_inner, EmbeddingRunReport};
 
@@ -176,7 +175,7 @@ pub fn llm_configured_with_audit(db_state: &State<'_, DbState>) -> bool {
 pub fn check_llm_configured_or_skip_conn(
     conn: &rusqlite::Connection,
 ) -> Option<BatchImportPhaseResult> {
-    if llm_config_repo::has_config(conn).unwrap_or(false) {
+    if crate::llm::readiness::embedding_generation_ready(conn).unwrap_or(false) {
         return None;
     }
     let audit_detail = "Batch import Phase 5 (Embeddings) skipped: LLM not \

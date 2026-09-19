@@ -11,7 +11,6 @@ use crate::db::app_settings_repo::{self, EmbeddingStatus};
 use crate::db::article_repo;
 use crate::db::chunk_repo;
 use crate::db::embedding_repo;
-use crate::db::llm_config_repo;
 use crate::embedding::text::{expected_rows, hash_text, ChunkInput};
 use crate::error::AppError;
 
@@ -81,8 +80,11 @@ pub struct WorkList {
 /// Compute rows needing (re)embedding. Base-condition gates return empty
 /// `WorkList` with `SkipReason`. (`UnknownNotProbed` → runner probes first.)
 pub fn compute_work_list(conn: &Connection, scope: &EmbeddingScope) -> Result<WorkList, AppError> {
-    // Base-condition gate 1: LLM configured.
-    if !llm_config_repo::has_config(conn)? {
+    // Base-condition gate 1: generation is usable for the embedding backend
+    // (cloud row under configured_provider; installed components under
+    // bango_local) - chat-backend usability alone must not green-light the
+    // cloud embedding branch.
+    if !crate::llm::readiness::embedding_generation_ready(conn)? {
         return Ok(WorkList {
             rows: Vec::new(),
             total_articles: 0,

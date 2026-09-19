@@ -13,10 +13,10 @@ use crate::db::app_settings_repo::{self, EmbeddingStatus};
 use crate::db::llm_config_repo;
 use crate::embedding::backend::EmbeddingBackend;
 use crate::embedding::local::manifest::local_manifest;
-use crate::embedding::local::paths::resolve_ai_paths;
 use crate::embedding::local::state::{assess_installation, LocalEmbeddingState};
 use crate::error::AppError;
 use crate::llm::embedding::check_embedding_support;
+use crate::local_ai::paths::resolve_ai_paths;
 
 /// Compute the readiness payload for the given status filter.
 ///
@@ -114,7 +114,7 @@ pub fn compute_readiness(
 /// parse). Readiness polls on mount, Settings edits, and search submits -
 /// never in a loop - so the burst stays brief; restructuring (probing after
 /// release) would split the payload construction for no measurable gain.
-fn local_components_ready(conn: &Connection) -> bool {
+pub(crate) fn local_components_ready(conn: &Connection) -> bool {
     let storage_root = app_settings_repo::get_setting(conn, app_settings_repo::STORAGE_ROOT_KEY)
         .ok()
         .flatten()

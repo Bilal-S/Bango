@@ -285,7 +285,8 @@ byte-identical). `prompt.rs` `SYSTEM_PROMPT` carries a `## Tag and Label
 Guidelines` section (v6.9). `llm_client.rs` gains a non-breaking
 `send_with_type(system, user, LlmRequestType)` default method (delegates to
 `send`); only `HttpLlmClient` overrides it to route the type through the
-orchestrator.
+orchestrator with JSON intent (`send_opts(..., true)`), so the Bango AI path
+gets grammar-backed `response_format` while cloud transports see no new field.
 
 ### Tag/label sanitization (v6.9)
 

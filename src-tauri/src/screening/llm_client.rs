@@ -36,7 +36,11 @@ pub struct HttpLlmClient {
 #[async_trait::async_trait]
 impl LlmClient for HttpLlmClient {
     async fn send(&self, system: &str, user: &str) -> Result<(String, usize), AppError> {
-        self.orchestrator.send(&self.config, system, user, LlmRequestType::Screening).await
+        /* Screening prompts are JSON-expected; the local engine path opts into
+        grammar-backed `response_format` (a no-op on cloud transports). */
+        self.orchestrator
+            .send_opts(&self.config, system, user, LlmRequestType::Screening, true)
+            .await
     }
 
     async fn send_with_type(
@@ -45,6 +49,6 @@ impl LlmClient for HttpLlmClient {
         user: &str,
         request_type: LlmRequestType,
     ) -> Result<(String, usize), AppError> {
-        self.orchestrator.send(&self.config, system, user, request_type).await
+        self.orchestrator.send_opts(&self.config, system, user, request_type, true).await
     }
 }

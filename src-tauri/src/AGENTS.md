@@ -137,6 +137,10 @@ described inline.
 - **`llm/`** - OpenAI-compatible + Google chat-completion client + the
   centralized LLM orchestrator (concurrency, rate limiting, timeout,
   temperature recovery, embeddings routing). See `llm/AGENTS.md`.
+- **`local_ai/`** - shared local-AI artifact lifecycle for Bango Local
+  embeddings and Bango AI: OneDrive-aware path resolution, pinned-manifest
+  primitives, streamed download/promote, archive extraction, and derived
+  install state (all landed in T2). See `local_ai/AGENTS.md`.
 - **`screening/`** - Tier 3 AI screening engine (Abstract/Enhanced/Two-stage)
   + v8.x cancel/timeout/diagnostics contracts. See `screening/AGENTS.md`.
 - **`wiki/`** - LLM Wiki knowledge-base (parallel chunked ingest, 5-layer

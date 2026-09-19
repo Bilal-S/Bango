@@ -10,7 +10,6 @@ use crate::commands::translation::enqueue_article_translation_inner;
 use crate::db::article_repo;
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
-use crate::db::llm_config_repo;
 use crate::translation::language::should_skip_translation;
 use crate::translation::worker::TranslationJobKind;
 
@@ -32,7 +31,7 @@ pub fn check_llm_configured_or_skip(
     conn: &rusqlite::Connection,
     total: usize,
 ) -> Option<BatchImportPhaseResult> {
-    if llm_config_repo::has_config(conn).unwrap_or(false) {
+    if crate::llm::readiness::has_usable_llm(conn).unwrap_or(false) {
         return None;
     }
     // Write a system-level audit record so the skip is visible in Diagnostics

@@ -26,13 +26,13 @@ use crate::embedding::local::download::{
 };
 use crate::embedding::local::engine::{EnginePaths, LocalEngine};
 use crate::embedding::local::manifest::local_manifest;
-use crate::embedding::local::paths::{resolve_ai_paths, MODEL_DIR_NAME};
 use crate::embedding::local::profile::{
     LOCAL_EMBEDDING_DIMENSIONS, LOCAL_PROFILE_DIR, LOCAL_PROFILE_ID,
 };
 use crate::embedding::local::prompt::EmbeddingRole;
 use crate::embedding::local::state::assess_installation;
 use crate::error::AppError;
+use crate::local_ai::paths::{resolve_ai_paths, MODEL_DIR_NAME};
 
 /// Managed state for the install lifecycle (one concurrent install; the
 /// cancel token is snapshotted by the running install).

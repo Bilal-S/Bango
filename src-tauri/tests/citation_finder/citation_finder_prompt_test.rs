@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use bango_lib::citation_finder::prompt::{
     build_per_statement_prompt, build_whole_block_prompt, ground_quotes, parse_citation_outputs,
-    parse_classification, CandidateMetadata, CandidatePassage, CitationLlmOutput,
+    parse_claim_list, parse_classification, CandidateMetadata, CandidatePassage, CitationLlmOutput,
     CITATION_FINDER_SYSTEM_PROMPT,
 };
 use bango_lib::citation_finder::MatchClassification;
@@ -71,8 +71,22 @@ fn system_prompt_contains_required_fields() {
     assert!(prompt.contains("relevance_explanation"));
     assert!(prompt.contains("article_id"));
     assert!(prompt.contains("claim"));
-    assert!(prompt.contains("JSON array"), "must request JSON array");
+    assert!(prompt.contains("JSON array"), "must describe the results array");
     assert!(prompt.contains("at most 10"), "must cap at 10 results");
+}
+
+#[test]
+fn system_prompt_requests_object_wrapper_for_local_json_grammar() {
+    // llama.cpp's response_format json_object grammar cannot emit a bare
+    // array, so the prompt must request an object with a "results" array
+    // (the local wrapper shape) instead of an array-only instruction.
+    let prompt = CITATION_FINDER_SYSTEM_PROMPT;
+    assert!(prompt.contains("JSON object"), "must request a JSON object");
+    assert!(prompt.contains("results"), "must name the results wrapper key");
+    assert!(
+        prompt.contains("EVERY candidate") || prompt.to_lowercase().contains("every candidate"),
+        "must ask for an entry per candidate, not only the first"
+    );
 }
 
 // ── build_whole_block_prompt ─────────────────────────────────────────────
@@ -372,10 +386,53 @@ fn parse_outputs_unwraps_data_key() {
 }
 
 #[test]
-fn parse_outputs_unknown_wrapper_key_returns_error() {
-    // An object whose key is NOT in the known wrapper-key set surfaces an
-    // error (not silently empty) so genuine LLM failures aren't masked.
-    let json = r#"{"whatever":[{"article_id":"a1"}]}"#;
+fn parse_outputs_unwraps_result_singular_key() {
+    // Probe-observed local shape: llama.cpp's json_object grammar forced a
+    // wrapper and Ornith chose "result" (singular), which the pre-fix parser
+    // rejected.
+    let json = r#"{"result":[{"article_id":"a1","classification":"validating","relevance_explanation":"e","misrepresents_source":false}]}"#;
+    let outputs = parse_citation_outputs(json).expect("parse");
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(outputs[0].article_id, "a1");
+}
+
+#[test]
+fn parse_outputs_recovers_arbitrary_wrapper_key() {
+    // Any object with exactly one array-valued property is recovered even
+    // when the model invents a wrapper key (pre-fix this errored).
+    let json = r#"{"whatever":[{"article_id":"a1","classification":"validating"}]}"#;
+    let outputs = parse_citation_outputs(json).expect("parse");
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(outputs[0].article_id, "a1");
+}
+
+#[test]
+fn parse_outputs_recovers_flat_single_object_with_article_id() {
+    // A local model that skips the array and returns one bare classification
+    // object is treated as a one-element result instead of a hard failure.
+    let json = r#"{"article_id":"a1","claim":"c","classification":"validating","relevance_explanation":"e","misrepresents_source":false}"#;
+    let outputs = parse_citation_outputs(json).expect("parse");
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(outputs[0].article_id, "a1");
+    assert_eq!(outputs[0].classification, "validating");
+}
+
+#[test]
+fn parse_outputs_recovers_flat_numeric_key_object() {
+    // Exact live failure shape: Ornith emitted {"0":"art-1", ...} for the
+    // real 15-candidate prompt instead of an array.
+    let json = r#"{"0":"art-1","claim":"Sugar is bad for you","classification":"validating","relevance_explanation":"e","misrepresents_source":false,"justifying_sentences":[]}"#;
+    let outputs = parse_citation_outputs(json).expect("parse");
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(outputs[0].article_id, "art-1");
+    assert_eq!(outputs[0].classification, "validating");
+}
+
+#[test]
+fn parse_outputs_rejects_object_without_array_or_element() {
+    // An object with no array value, no article_id, and no numeric article
+    // key is still a genuine shape failure.
+    let json = r#"{"status":"unrelated"}"#;
     assert!(parse_citation_outputs(json).is_err());
 }
 
@@ -591,4 +648,43 @@ fn candidates_section_includes_none_section_as_omitted_line() {
     // The a2 candidate block should NOT have a section line.
     let a2_block = prompt.split("article_id: a2").nth(1).unwrap_or("");
     assert!(!a2_block.contains("- section:"), "None section omitted");
+}
+
+// ── parse_claim_list (claim-splitter wrapper tolerance) ────────────────
+
+#[test]
+fn parse_claim_list_accepts_bare_array() {
+    let claims = parse_claim_list(r#"["one","two"]"#).expect("parse");
+    assert_eq!(claims, vec!["one".to_string(), "two".to_string()]);
+}
+
+#[test]
+fn parse_claim_list_unwraps_claims_key() {
+    let claims = parse_claim_list(r#"{"claims":["one","two"]}"#).expect("parse");
+    assert_eq!(claims, vec!["one".to_string(), "two".to_string()]);
+}
+
+#[test]
+fn parse_claim_list_recovers_arbitrary_wrapper_key() {
+    let claims = parse_claim_list(r#"{"result":["only"]}"#).expect("parse");
+    assert_eq!(claims, vec!["only".to_string()]);
+}
+
+#[test]
+fn parse_claim_list_empty_array_is_ok() {
+    let claims = parse_claim_list(r#"{"claims":[]}"#).expect("parse");
+    assert!(claims.is_empty());
+}
+
+#[test]
+fn parse_claim_list_filters_non_string_elements() {
+    let claims = parse_claim_list(r#"["one",2,null,"two"]"#).expect("parse");
+    assert_eq!(claims, vec!["one".to_string(), "two".to_string()]);
+}
+
+#[test]
+fn parse_claim_list_rejects_non_array_garbage() {
+    assert!(parse_claim_list(r#"{"status":"ok"}"#).is_err());
+    assert!(parse_claim_list(r#""just a string""#).is_err());
+    assert!(parse_claim_list(r#"[1,2,3]"#).is_err());
 }

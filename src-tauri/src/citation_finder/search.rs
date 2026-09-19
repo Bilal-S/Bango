@@ -20,7 +20,7 @@ use super::claim_splitter::{
 };
 use super::prompt::{
     build_per_statement_prompt, build_whole_block_prompt, ground_quotes, parse_citation_outputs,
-    parse_classification, CandidateMetadata, CandidatePassage, CitationLlmOutput,
+    parse_claim_list, parse_classification, CandidateMetadata, CandidatePassage, CitationLlmOutput,
     CITATION_FINDER_SYSTEM_PROMPT,
 };
 use super::readiness::compute_readiness;
@@ -32,7 +32,6 @@ use crate::citation_finder::{
 use crate::db::article_repo;
 use crate::db::chunk_repo;
 use crate::db::connection::{lock_conn, DbState};
-use crate::db::llm_config_repo;
 use crate::embedding::director::EmbeddingScope;
 use crate::embedding::recall::{self, EmbeddingHit};
 use crate::embedding::runner::{generate_embeddings_inner, EmbeddingBatchSender};
@@ -80,7 +79,7 @@ impl CitationLlmSender for HttpCitationLlmSender {
         let config = {
             let db = self.app_handle.state::<DbState>();
             let conn = lock_conn(&db.conn)?;
-            llm_config_repo::get_config(&conn)?
+            crate::llm::effective_config::resolve(&conn)?
         };
         let Some(cfg) = config else {
             return Err(AppError::Validation("LLM not configured".to_string()));
@@ -96,7 +95,7 @@ impl CitationLlmSender for HttpCitationLlmSender {
         let config = {
             let db = self.app_handle.state::<DbState>();
             let conn = lock_conn(&db.conn)?;
-            llm_config_repo::get_config(&conn)?
+            crate::llm::effective_config::resolve(&conn)?
         };
         let Some(cfg) = config else {
             return Err(AppError::Validation("LLM not configured".to_string()));
@@ -481,7 +480,7 @@ async fn run_per_statement(
     if cancel_token.load(Ordering::Relaxed) {
         return Err(cancelled_error());
     }
-    let raw_claims: Vec<String> = serde_json::from_str(&split_json)
+    let raw_claims = parse_claim_list(&split_json)
         .map_err(|e| AppError::Import(format!("Claim splitter returned invalid JSON: {e}")))?;
     let claims = enforce_max_claims(raw_claims);
     if claims.is_empty() {

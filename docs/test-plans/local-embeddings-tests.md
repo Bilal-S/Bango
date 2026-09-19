@@ -8,18 +8,18 @@ Note: rows tagged `#[ignore = "slow"]` (the T4 live spike) count as present
 under the repo's slow-test convention - they run via `npm run test:rust:full`
 or explicitly with `-- --ignored` plus their documented env-var artifacts.
 
-## T2 - Pure foundations (`embedding/local/`), backend setting, service router
+## T2 - Pure foundations (`embedding/local/`; path resolution moved to shared `local_ai/` in the Bango AI T2), backend setting, service router
 
 | Test | Assertion |
 |---|---|
-| `src-tauri/src/embedding/local/paths.rs::onedrive_personal_segment_detected` | Personal `OneDrive` path segment is flagged |
-| `src-tauri/src/embedding/local/paths.rs::onedrive_business_segment_detected` | `OneDrive - Contoso` business segment is flagged |
-| `src-tauri/src/embedding/local/paths.rs::onedrive_detection_is_case_insensitive` | Detection ignores case |
-| `src-tauri/src/embedding/local/paths.rs::plain_documents_path_not_flagged` | Plain Documents paths are not flagged |
-| `src-tauri/src/embedding/local/paths.rs::resolve_normal_root_uses_storage_model_dir` | Model root is `{storage_root}/model` without OneDrive |
-| `src-tauri/src/embedding/local/paths.rs::resolve_onedrive_root_falls_back_to_app_data` | Model root falls back to app data under OneDrive |
-| `src-tauri/src/embedding/local/paths.rs::resolve_runtime_always_app_data` | Runtime root always derives from app data |
-| `src-tauri/src/embedding/local/paths.rs::resolve_missing_app_data_base_keeps_storage_root` | Missing app-data base degrades to the storage root, no fallback flag |
+| `src-tauri/src/local_ai/paths.rs::onedrive_personal_segment_detected` | Personal `OneDrive` path segment is flagged |
+| `src-tauri/src/local_ai/paths.rs::onedrive_business_segment_detected` | `OneDrive - Contoso` business segment is flagged |
+| `src-tauri/src/local_ai/paths.rs::onedrive_detection_is_case_insensitive` | Detection ignores case |
+| `src-tauri/src/local_ai/paths.rs::plain_documents_path_not_flagged` | Plain Documents paths are not flagged |
+| `src-tauri/src/local_ai/paths.rs::resolve_normal_root_uses_storage_model_dir` | Model root is `{storage_root}/model` without OneDrive |
+| `src-tauri/src/local_ai/paths.rs::resolve_onedrive_root_falls_back_to_app_data` | Model root falls back to app data under OneDrive |
+| `src-tauri/src/local_ai/paths.rs::resolve_runtime_always_app_data` | Runtime root always derives from app data |
+| `src-tauri/src/local_ai/paths.rs::resolve_missing_app_data_base_keeps_storage_root` | Missing app-data base degrades to the storage root, no fallback flag |
 | `src-tauri/src/embedding/local/thread_budget.rs::budget_caps_at_four_threads` | Budget never exceeds 4 intra-op threads |
 | `src-tauri/src/embedding/local/thread_budget.rs::budget_reserves_two_cores` | Two cores stay reserved for UI/runtime/DB on large machines |
 | `src-tauri/src/embedding/local/thread_budget.rs::budget_small_machine_floor_one` | 1-3 core machines still receive at least 1 thread |
@@ -58,8 +58,8 @@ or explicitly with `-- --ignored` plus their documented env-var artifacts.
 | `src-tauri/src/embedding/local/manifest.rs::manifest_rejects_non_https_external_url` | Plain-HTTP external URLs rejected; loopback HTTP allowed only at a host boundary |
 | `src-tauri/src/embedding/local/manifest.rs::manifest_required_bytes_cover_download_plus_margin` | Required disk bytes exceed the download total within a bounded margin |
 | `src-tauri/src/embedding/local/manifest.rs::manifest_required_bytes_double_for_repair` | Repair budgets a full second staged copy |
-| `src-tauri/src/embedding/local/download.rs::target_supported_matrix` | Only win-x64, osx-arm64, linux-x64 pass the gate (osx-x86_64 dropped: no runtime builds) |
-| `src-tauri/src/embedding/local/download.rs::part_extension_appends_to_file_name` | Part files carry the `.part` suffix |
+| `src-tauri/src/local_ai/download.rs::target_supported_matrix` | Only win-x64, osx-arm64, linux-x64 pass the gate (osx-x86_64 dropped: no runtime builds) |
+| `src-tauri/src/local_ai/download.rs::part_extension_appends_to_file_name` | Part files carry the `.part` suffix |
 | `src-tauri/tests/embedding/embedding_component_test.rs::component_install_downloads_and_verifies` | Install lands pinned files + manifest and reports Ready |
 | `src-tauri/tests/embedding/embedding_component_test.rs::component_install_rejects_bad_hash` | Hash mismatch aborts with no partial install |
 | `src-tauri/tests/embedding/embedding_component_test.rs::component_install_is_idempotent_without_refetch` | Repair skips pinned files; each file fetched exactly once |

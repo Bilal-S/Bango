@@ -163,10 +163,12 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   misrepresents the source. The `#[serde(alias = "fairlyParaphrased")]` keeps
   deserialization backward-compatible with a stale prompt template cached
   mid-rollout.
-- **Lenient LLM-response parsing** (`parse_citation_outputs` in `prompt.rs`):
-  the system prompt requests snake_case field names + a bare JSON array, but
-  LLMs are unreliable about casing and shape, so the parser is tolerant at
-  three layers. (1) **Field-name aliases**: every `CitationLlmOutput` field
+- **Lenient LLM-response parsing** (`parse_citation_outputs` + `parse_claim_list`
+  in `prompt.rs`):
+  the system prompt requests snake_case field names wrapped in
+  `{"results": [...]}`, but LLMs are unreliable about casing and shape, so the
+  parser is tolerant at three layers. (1) **Field-name aliases**: every
+  `CitationLlmOutput` field
   accepts both snake_case (canonical, what the prompt asks for) and camelCase
   (what some LLMs emit) via `#[serde(alias = "...")]`. The struct is
   `Deserialize`-only - it is never serialized to the frontend (the IPC-facing
@@ -175,19 +177,30 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   has zero IPC impact. `classification` + `relevance_explanation` carry
   `#[serde(default)]` (→ empty string); `parse_classification("")` returns
   `None` and drops the entry, so a missing classification is filtered not
-  fatal. (2) **Object-wrapper tolerance**: `parse_citation_outputs` accepts a
-  bare JSON array OR `{...}` with one of the known wrapper keys (`results`,
-  `citations`, `data`, `matches`, `items`, `output`). (3) **Per-element fault
+  fatal. (2) **Object-shape recovery** (`resolve_array`): accepts a bare JSON
+  array OR an object - known wrapper keys (`results`, `result`, `citations`,
+  `data`, `matches`, `items`, `output`) win, then a flat single-classification
+  object (`article_id`/`articleId`), then the local `{"0":"art-1", ...}`
+  shape (first numeric key maps to the article id), then any other
+  array-valued property. This is required because llama.cpp's
+  `response_format: json_object` grammar CANNOT emit a bare top-level array,
+  so local calls always wrap; the prompt requests `{"results": [...]}` and
+  the parser recovers when the 9B model picks another object shape. (3)
+  **Per-element fault
   isolation**: each array element is deserialized independently so one
   malformed element (missing field, typo'd key) costs only that element - the
   rest of the batch survives. If zero elements parse, the first error is
   surfaced (so genuine LLM failures aren't masked as an empty result); a
-  genuine `[]` returns `Ok(vec![])`. Both `run_whole_block` and
-  `run_per_statement` route through this helper; the previous inline
+  genuine `[]` returns `Ok(vec![])`. `parse_claim_list` applies the same
+  array recovery to the claim splitter (which requests `{"claims": [...]}`)
+  and keeps only string elements; a non-empty array with no strings errors.
+  Both `run_whole_block` and
+  `run_per_statement` route through these helpers; the previous inline
   `serde_json::from_str::<Vec<_>>` calls were all-or-nothing and dropped
   every good result alongside a single bad one (the exact `missing field
   articleId` bug-report failure mode). Pinned by the snake_case + wrapper +
-  fault-isolation tests in `tests/citation_finder/citation_finder_prompt_test.rs`.
+  recovery + fault-isolation tests in
+  `tests/citation_finder/citation_finder_prompt_test.rs`.
 - **`normalize_claim_key`** (pure, `#[must_use]`) drives the
   `(article_id, claim)` lookup in `merge_outputs`: trim + collapse internal
   whitespace + lowercase so cosmetic claim drift between the splitter and the

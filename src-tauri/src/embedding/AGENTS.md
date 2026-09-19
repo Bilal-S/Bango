@@ -22,14 +22,18 @@ foundations (`local/`), plus the storage layer in `db/embedding_repo.rs` (see
   (the `EmbeddingBackend` domain type - leaf module), `service.rs`
   (the `EmbeddingService` backend router + offline local probe +
   `CloudEmbeddingProvider`), `local/` (Bango Local: `manifest.rs`
-  pinned component manifest with per-file URLs + sizes + SHA-256 +
-  the pinned ONNX Runtime section, `download.rs` atomic installer/verifier/
+  the embedding profile manifest (per-file URLs + sizes + SHA-256 + the
+  pinned ONNX Runtime section; generic pin primitives shared via
+  `local_ai::manifest`), `download.rs` atomic installer/verifier/
   remover with target + disk-space gates + runtime archive install +
-  single-member extraction, `engine.rs` the local inference engine,
-  `paths.rs` artifact-path resolution with the OneDrive fallback,
+  single-member extraction (generic download/promote/extract primitives
+  shared via `local_ai::download`), `engine.rs` the local inference engine,
   `thread_budget.rs` CPU-cap policy, `prompt.rs` EmbeddingGemma role
   prefixes, `profile.rs` profile identity + on-disk profile dir,
-  `state.rs` installation state probe), `mod.rs`.
+  `state.rs` installation state probe (generic assessment shared via
+  `local_ai::state`; the embedding alias keeps the historical
+  `LocalEmbeddingState` name), `mod.rs`. Artifact path resolution
+  moved to the shared `local_ai/paths.rs` (see `local_ai/AGENTS.md`) in T2.
 - Consumed by: `commands/embedding.rs` (the `recall` command + generation
   triggers), `commands/summary.rs` (post-summary fire-and-forget),
   `commands/full_text.rs` (rebuild-text-chunks cascade),
@@ -40,6 +44,11 @@ foundations (`local/`), plus the storage layer in `db/embedding_repo.rs` (see
 ## Local Contracts
 
 ### Director work-list scope (`director.rs::compute_work_list`)
+
+Gate 1 is backend-aware (Bango AI T6): `bango_local` embeddings require ready
+local components; `configured_provider` embeddings require the cloud row
+(`llm::readiness::embedding_generation_ready`), so chat-backend usability
+alone never green-lights the cloud branch.
 
 `EmbeddingScope.status_filter` is a comma-joined status whitelist (e.g.
 `"working,included"`); every listed status produces work and a blank/`None`
@@ -69,7 +78,7 @@ behind every backend-aware probe path.
 - Local branch: a cheap `probe_installation_state` pre-check returns the
   actionable not-installed error fast; `Ready` runs
   `LocalEngine::embed` (below). Never a silent cloud fallback.
-- OneDrive fallback (`local/paths.rs`): the model root is
+- OneDrive fallback (shared `local_ai/paths.rs`): the model root is
   `{storage_root}/model` unless the storage root path contains a OneDrive
   segment (personal or `OneDrive - <tenant>` business, whole-segment,
   case-insensitive) - then `{data_local}/Bango/ai/models` with
@@ -130,6 +139,9 @@ pins for EVERY file (LFS oids from the pinned repo revision; the three small
 non-LFS files were hashed at build time), license fields for the consent
 dialog, and profile identity enforced by `parse_manifest` against
 `LOCAL_PROFILE_ID` (drift is a hard error).
+Generic pin primitives (file shape, scheme policy, hash/path validation,
+target mapping, disk math) live in `local_ai::manifest` (T2); the embedding
+`ComponentManifest` keeps the profile and runtime shapes.
 Install transaction: stream each file into
 `<model_root>/.staging/<LOCAL_PROFILE_DIR>/` as `<name>.part` with the hash
 computed in-pass, verify pins (per-file `spawn_blocking`), promote via
@@ -325,13 +337,21 @@ backend-aware sender via `runner::backend_sender(app_handle)`.
   per-provider limits table)
 - `embedding/batching.rs` inline (7: `group_into_embedding_batches` bin-pack
   respecting both caps)
-- `embedding/local/` inline (40: `paths.rs` OneDrive detection + resolution (8),
-  `thread_budget.rs` (3), `prompt.rs` (3), `state.rs` (11), `manifest.rs` (9),
-  `download.rs` (2), `engine.rs` (4: vector validation
-  accept/reject, dylib env-override + install-integrity resolution))
+- `embedding/local/` inline (30: `thread_budget.rs` (3), `prompt.rs` (3),
+  `state.rs` (11), `manifest.rs` (9), `engine.rs` (4: vector
+  validation accept/reject, dylib env-override + install-integrity resolution))
+- `local_ai/paths.rs` inline (8: OneDrive detection + resolution; moved from
+  `embedding/local/paths.rs` in the Bango AI T2)
+- `local_ai/manifest.rs` inline (1: generic pin validation) and
+  `local_ai/download.rs` inline (2: target matrix + `.part` suffix; moved from
+  `embedding/local/download.rs` in the Bango AI T2)
+- `local_ai/state.rs` inline (3: generic ready / stranded-park /
+  not-installed assessment)
 
-209 tests total (206 excluding the three `#[ignore = "slow"]` live tests; the
+199 tests total (196 excluding the three `#[ignore = "slow"]` live tests; the
 PDF chunk fixture generator is also `#[ignore]`d, so it runs only on demand).
+The shared-module inline tests moved to `local_ai/` in the Bango AI T2 (paths 8,
+manifest 1 new, download 2).
 
 ## Child DOX Index
 

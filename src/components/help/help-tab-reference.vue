@@ -324,6 +324,14 @@ watch(
             <span class="material-symbols-outlined ref-nav__icon">blur_on</span>
             Embeddings
           </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-bango-ai' }"
+            @click="selectRefSection('ref-bango-ai')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">smart_toy</span>
+            Bango AI
+          </button>
         </nav>
       </aside>
 
@@ -2616,6 +2624,70 @@ ER  - </pre>
                 downloaded model files; your articles stay untouched.
               </p>
             </div>
+          </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
+        </section>
+
+        <!-- SECTION: BANGO AI (LOCAL LLM) -->
+        <section id="ref-bango-ai" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">smart_toy</span>
+            <h2 class="ref-section__title">Bango AI</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              Bango AI is a complete AI model that runs on your own computer. When it is selected,
+              the writing tasks you ask Bango to do - chat, summaries, and screening - are handled
+              locally instead of being sent to a cloud provider.
+            </p>
+
+            <h3>What Runs Where</h3>
+            <ul>
+              <li>
+                <strong>Configured Provider:</strong> Bango sends requests to the AI provider you
+                set up in Settings. This requires a connection and is billed by that provider.
+              </li>
+              <li>
+                <strong>Bango AI:</strong> The model runs on this computer. Your article text stays
+                on-device for these requests, there is no API key, and there are no per-token
+                charges. Nothing is sent to the cloud for Bango AI requests.
+              </li>
+            </ul>
+
+            <h3>Before You Set It Up</h3>
+            <ul>
+              <li>
+                Bango AI downloads an AI engine (about 18 MB) and the model (about 5.8 GB). The
+                download can be cancelled and resumed, and everything can be removed later from
+                Settings.
+              </li>
+              <li>
+                The model needs roughly 8 GB of memory to run; 16 GB or more of total memory is
+                recommended. On smaller machines it may be slow or fail to load.
+              </li>
+              <li>
+                Local AI is slower than a cloud provider, especially on long full-text screening
+                runs. The <strong>Test Bango AI</strong> button shows the measured speed on your
+                machine.
+              </li>
+            </ul>
+
+            <h3>How Bango Decides</h3>
+            <p>
+              At the top of the AI Provider settings you choose how Bango runs AI: your configured
+              provider or Bango AI. The choice can be switched at any time. If Bango AI is selected
+              on a computer where it is not set up yet, Bango asks whether to set it up or to use
+              the configured provider - it never silently falls back to the cloud.
+            </p>
+
+            <h3>Manage in Settings</h3>
+            <p>
+              Download, test, verify, repair, or remove Bango AI from Settings &rarr; AI Provider
+              (Bango AI). Removing it deletes the downloaded engine and model files; your articles
+              stay untouched.
+            </p>
           </div>
           <footer class="ref-section__footer">
             <HelpScrollToTop @click="scrollToTop" />

@@ -26,6 +26,15 @@ export function isLocalProvider(provider: LlmProvider): boolean {
   return LOCAL_PROVIDERS.has(provider);
 }
 
+/** Generation backend selection (mirrors the Rust `LlmBackend`). */
+export type LlmBackendId = 'configured_provider' | 'bango_ai';
+
+/** Minimal shape of the `get_bango_ai_status` payload used here. */
+interface BangoAiStatusLike {
+  state?: string;
+  supportedTarget?: boolean;
+}
+
 const DEFAULT_CONFIG: LlmConfig = {
   provider: 'openai',
   endpointUrl: 'https://api.openai.com/v1',
@@ -44,14 +53,19 @@ export const useLlmConfigStore = defineStore('llm-config', () => {
   const loading = ref(false);
   const initialized = ref(false);
   const testResult = ref<TestResult | null>(null);
+  const backend = ref<LlmBackendId>('configured_provider');
+  const localReady = ref(false);
+  const localSupported = ref(true);
 
   /**
    * Whether an LLM provider is fully configured. Mirrors the backend
-   * `llm_config_repo::has_config` contract: initialized, endpoint+model
-   * non-empty, and either local or an API key is present.
+   * `llm_config_repo::has_config` contract under `configured_provider`; under
+   * `bango_ai` it is the installed-component readiness instead (the cloud row
+   * is never consulted).
    */
   const isConfigured = computed(() => {
     if (!initialized.value) return false;
+    if (backend.value === 'bango_ai') return localReady.value && localSupported.value;
     const c = config.value;
     if (!c.endpointUrl.trim() || !c.modelName.trim()) return false;
     return isLocalProvider(c.provider) || !!c.apiKeyEncrypted;
@@ -76,9 +90,34 @@ export const useLlmConfigStore = defineStore('llm-config', () => {
         }
         config.value = saved;
       }
+      /* Backend awareness is best-effort: a failed/absent status call keeps
+      the cloud rule so the gate stays conservative. */
+      await refreshBackendState();
       initialized.value = true;
     } finally {
       loading.value = false;
+    }
+  }
+
+  /**
+   * Re-read the backend selection + Bango AI readiness. Called whenever
+   * Bango AI state legitimately changes (install completion, backend switch)
+   * so `isConfigured` unlocks - or re-locks - without an app restart
+   * (aifixes1 F16: downloaded-and-ready local AI must unlock all LLM gates).
+   */
+  async function refreshBackendState(): Promise<void> {
+    /* Best-effort: a failed/absent status call keeps the cloud rule so the
+    gate stays conservative. */
+    try {
+      const selected = await tauriCommand<string>('get_llm_backend');
+      if (selected === 'bango_ai' || selected === 'configured_provider') {
+        backend.value = selected;
+      }
+      const status = await tauriCommand<BangoAiStatusLike | null>('get_bango_ai_status');
+      localReady.value = status?.state === 'ready';
+      localSupported.value = status?.supportedTarget !== false;
+    } catch {
+      localReady.value = false;
     }
   }
 
@@ -86,6 +125,9 @@ export const useLlmConfigStore = defineStore('llm-config', () => {
     config.value = { ...DEFAULT_CONFIG };
     initialized.value = false;
     testResult.value = null;
+    backend.value = 'configured_provider';
+    localReady.value = false;
+    localSupported.value = true;
   }
 
   function clearTestResult(): void {
@@ -97,9 +139,13 @@ export const useLlmConfigStore = defineStore('llm-config', () => {
     loading,
     initialized,
     testResult,
+    backend,
+    localReady,
+    localSupported,
     isConfigured,
     fetchIfNeeded,
     fetch,
+    refreshBackendState,
     invalidate,
     clearTestResult,
   };

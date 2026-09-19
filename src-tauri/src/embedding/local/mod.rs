@@ -11,7 +11,6 @@
 pub mod download;
 pub mod engine;
 pub mod manifest;
-pub mod paths;
 pub mod profile;
 pub mod prompt;
 pub mod state;
@@ -28,7 +27,9 @@ pub use manifest::{
     local_manifest, parse_manifest, ComponentManifest, ManifestFile, RuntimeFile, RuntimeManifest,
 };
 
-pub use paths::{is_onedrive_path, resolve_ai_paths, resolve_ai_paths_with_base, AiPaths};
+pub use crate::local_ai::paths::{
+    is_onedrive_path, resolve_ai_paths, resolve_ai_paths_with_base, AiPaths,
+};
 pub use profile::{
     LOCAL_EMBEDDING_DIMENSIONS, LOCAL_MAX_INPUT_TOKENS, LOCAL_PROFILE_DIR, LOCAL_PROFILE_ID,
 };

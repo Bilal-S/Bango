@@ -116,4 +116,13 @@ describe('formatLlmError', () => {
     const result = formatLlmError('rate limited by provider');
     expect(result.helpLink).toMatch(/#\w/);
   });
+
+  it('matches the Bango AI context-overflow message (aifixes1 F3)', () => {
+    const result = formatLlmError(
+      'Bango AI could not fit this prompt in the selected context. Reduce the Context setting or shorten the text.'
+    );
+    expect(result.matched).toBe(true);
+    expect(result.anchorId).toBe('bango-ai-context-overflow');
+    expect(result.solution).toContain('raise the Context setting');
+  });
 });

@@ -181,6 +181,13 @@ pub fn restore_config_raw(conn: &Connection, row: &RawLlmConfigRow) -> Result<()
 }
 
 pub fn save_config(conn: &Connection, config: &LlmConfig) -> Result<(), AppError> {
+    // The Bango AI provider is a runtime-only effective-config label; it must
+    // never reach the persisted row (the CHECK constraint has no such value).
+    if config.provider == LlmProvider::BangoAi {
+        return Err(AppError::Validation(
+            "The Bango AI provider is managed automatically and cannot be saved.".to_string(),
+        ));
+    }
     let key = aes_gcm::derive_key_from_machine();
     let encrypted_api_key = config
         .api_key_encrypted

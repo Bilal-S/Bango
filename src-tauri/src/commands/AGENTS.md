@@ -148,6 +148,40 @@ rebuild). New contract:
   `ensure_chunks_for_full_text_articles(_with_progress)` stay byte-identical
   (they run inside the screening task's own lock scope).
 
+### `bango_ai.rs` - Bango AI commands (T5)
+
+Eight commands over `llm::local` (engine/manifest contracts in
+`llm/AGENTS.md`): `get_bango_ai_status` (derived
+`installing > unsupported > ready/repair_required/not_installed`, engine
+state/busy, hardware profile + verdict, sizes, resolved paths, backend),
+`install_bango_ai` (async; `RunningGuard`; target + repair-aware disk
+preflight; runtime-first transaction: runtime bundle -> executable
+`--version` smoke -> model profile -> engine self-test -> activation;
+emits `bango_ai:component` progress with one combined monotonic total),
+`cancel_bango_ai_install` (`Arc<AtomicBool>`), `verify_bango_ai`
+(`spawn_blocking`, sizes + model SHA-256), `remove_bango_ai` (stops the
+engine first, sweeps model roots + the runtime version dir),
+`test_bango_ai` (starts the engine, returns load/response/tokens-per-second
+information), and `get_llm_backend`/`set_llm_backend` (strict
+`LlmBackend::parse_exact`; the DB burst is released before the awaited
+`engine.reset_off_thread()`).
+
+Install activation persists `bango_ai` only when the caller asked AND the
+self-test passed (`persist_backend_after_install_conn`) and then switches the
+live orchestrator backend (`activate_orchestrator_backend`, awaited with no DB
+guard held) so generation reaches the local engine without a restart or a
+radio toggle; cancel/failure leaves the previous backend active.
+`install_bango_ai_inner` accepts an
+injectable smoke function so the smoke-before-model ordering is testable
+without a real binary.
+
+Lock discipline: storage root/settings resolve in brief DB bursts; no DB
+guard is held across downloads, spawns, or HTTP calls. Registered in
+`lib.rs` with managed `Arc<BangoAiEngine>` + `BangoAiInstallState`; the
+`RunEvent::Exit` hook calls `engine.kill_blocking()`. Engine settings
+persistence (context/threads/reasoning + restart-on-change) is live via
+`set_bango_ai_settings` + the settings card's restart-on-change flow.
+
 ### Embedding generation + probe commands (`embedding.rs`)
 
 `generate_embeddings` / `regenerate_embeddings` build the backend-aware

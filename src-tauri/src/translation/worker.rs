@@ -9,9 +9,9 @@ use tokio::sync::mpsc;
 use crate::db::article_repo;
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
-use crate::db::llm_config_repo;
 use crate::error::AppError;
 use crate::llm::orchestrator::LlmOrchestrator;
+use crate::models::llm_config::LlmConfig;
 use crate::translation::engine::{
     translate_full_text, translate_metadata_only, TranslationLlmClient,
 };
@@ -52,6 +52,21 @@ impl TranslationWorkerHandle {
     }
 }
 
+/// Resolve the effective generation config + context window for a translation
+/// job. `None` = no usable generation backend (cloud row under
+/// configured_provider; installed components under bango_ai).
+pub fn resolve_translation_llm(
+    conn: &rusqlite::Connection,
+) -> Result<Option<(LlmConfig, i32)>, AppError> {
+    if !crate::llm::readiness::has_usable_llm(conn)? {
+        return Ok(None);
+    }
+    Ok(crate::llm::effective_config::resolve(conn)?.map(|config| {
+        let context = config.context_window_tokens;
+        (config, context)
+    }))
+}
+
 /// Spawn translation worker. Returns handle for enqueuing.
 ///
 /// Worker reads jobs from channel, fetches LLM config + orchestrator, dispatches
@@ -66,8 +81,10 @@ pub fn spawn_translation_worker(app: tauri::AppHandle) -> TranslationWorkerHandl
             let article_id = job.article_id.clone();
             let app_for_job = app_handle.clone();
 
-            // Fetch LLM config + orchestrator under short DB lock.
-            let (config, orchestrator) = {
+            // Fetch the effective generation config + orchestrator under a
+            // short DB lock (bango_ai resolves local; configured reads the
+            // cloud row).
+            let (config, context_window_tokens, orchestrator) = {
                 let db = app_handle.state::<DbState>();
                 let conn = match db.conn.lock() {
                     Ok(c) => c,
@@ -76,10 +93,10 @@ pub fn spawn_translation_worker(app: tauri::AppHandle) -> TranslationWorkerHandl
                         continue;
                     }
                 };
-                let config = match llm_config_repo::get_config(&conn) {
-                    Ok(Some(c)) => c,
+                let (config, context_window_tokens) = match resolve_translation_llm(&conn) {
+                    Ok(Some(resolved)) => resolved,
                     Ok(None) => {
-                        // LLM not configured: mark failed + audit.
+                        // LLM not usable: mark failed + audit.
                         let _ = article_repo::update_translation_status_failed(
                             &conn,
                             &article_id,
@@ -102,11 +119,9 @@ pub fn spawn_translation_worker(app: tauri::AppHandle) -> TranslationWorkerHandl
                     }
                 };
                 let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>().inner().clone();
-                (config, orchestrator)
+                (config, context_window_tokens, orchestrator)
             }; // DB lock released before async LLM call.
 
-            // context_window_tokens plumbed from LlmConfig for batch sizing.
-            let context_window_tokens = config.context_window_tokens;
             let client = TranslationLlmClient { config, orchestrator, job_id: article_id.clone() };
 
             // Engine takes &Mutex<Connection>, locks in bursts across .await.

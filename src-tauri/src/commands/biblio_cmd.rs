@@ -260,7 +260,7 @@ pub async fn biblio_analyze_cluster_themes(
     let (config, capped_articles, total) = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
-        let config = crate::db::llm_config_repo::get_config(&conn)?
+        let config = crate::llm::effective_config::resolve(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
 
         let articles = crate::biblio::thematic::resolve_members_to_articles(

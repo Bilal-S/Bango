@@ -6,6 +6,7 @@
 //! - **Per-statement:** multiple claims, candidates with per-claim passages;
 //!   LLM returns one classification per `(article, claim)` pair.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use serde::de::Error as _;
@@ -28,7 +29,9 @@ For each candidate:
   quoted in a way that MISREPRESENTS the source; false if it faithfully represents the
   surrounding text.
 
-Return ONLY a JSON array. For each element, use these fields:
+Return ONLY a JSON object with a single top-level \"results\" key whose value is a JSON
+array. Emit one entry for EVERY candidate you classify as validating or opposing; do
+not stop after the first. For each element of \"results\", use these fields:
 - article_id (string)
 - claim (string, the claim text this classification applies to; empty in whole-block mode)
 - classification (\"validating\" | \"opposing\")
@@ -274,17 +277,22 @@ fn normalize_for_grounding(s: &str) -> String {
 }
 
 /// Object-wrapper keys an LLM may wrap the JSON array in despite being told
-/// to return ONLY a JSON array. If `serde_json::from_str::<Vec<_>>` is used
-/// directly, any of these wrappers fails the whole parse; `parse_citation_outputs`
-/// unwraps them first.
-const WRAPPER_KEYS: &[&str] = &["results", "citations", "data", "matches", "items", "output"];
+/// to return a bare array. For local `response_format: json_object` calls the
+/// grammar FORCES an object, so the wrapper is guaranteed rather than
+/// incidental. If `serde_json::from_str::<Vec<_>>` is used directly, any of
+/// these wrappers fails the whole parse; `parse_citation_outputs` unwraps
+/// them first.
+const WRAPPER_KEYS: &[&str] =
+    &["results", "result", "citations", "data", "matches", "items", "output"];
 
 /// Lenient parser for the Citation Finder LLM's JSON response.
 ///
-/// Three layers of resilience:
-/// 1. **Object-wrapper tolerance**: accepts a bare array OR `{…}` with one of
-///    the known wrapper keys (`results`, `citations`, `data`, `matches`,
-///    `items`, `output`).
+/// Four layers of resilience:
+/// 1. **Object-shape recovery**: accepts a bare array OR an object. Known
+///    wrapper keys (`results`, `result`, ...) win; otherwise the first
+///    array-valued property is used; a flat single-classification object is
+///    treated as a one-element array, including the local `{"0":"art-1", ...}`
+///    shape llama.cpp's json_object grammar produces.
 /// 2. **Per-element fault isolation**: each element is deserialized
 ///    independently; one bad element costs only that element (previously a
 ///    single bad entry threw away every good result — the exact failure mode
@@ -302,13 +310,13 @@ pub fn parse_citation_outputs(raw: &str) -> Result<Vec<CitationLlmOutput>, serde
     // the value directly. This avoids re-parsing per code path.
     let value: serde_json::Value = serde_json::from_str(raw)?;
 
-    /* Resolve to the array `Value` (unwrap a known wrapper object if present).
-    `serde::de::Error` is imported `as _` above so `serde_json::Error::custom`
-    resolves via trait method dispatch. */
+    /* Resolve to the array `Value` (unwrap a wrapper object or rescue a flat
+    single object). `serde::de::Error` is imported `as _` above so
+    `serde_json::Error::custom` resolves via trait method dispatch. */
     let array_value = resolve_array(&value).ok_or_else(|| {
         serde_json::Error::custom(
             "expected a JSON array or an object with one of the keys: \
-             results, citations, data, matches, items, output",
+             results, result, citations, data, matches, items, output",
         )
     })?;
 
@@ -347,28 +355,77 @@ pub fn parse_citation_outputs(raw: &str) -> Result<Vec<CitationLlmOutput>, serde
     }
 }
 
-/// Resolve a parsed JSON `Value` to the underlying array, descending into a
-/// known wrapper-key object if the top-level value is an object rather than
-/// an array. Returns `None` if the value is neither an array nor a wrapper
-/// object.
-fn resolve_array(value: &serde_json::Value) -> Option<&serde_json::Value> {
+/// Resolve a parsed JSON `Value` to the underlying array.
+///
+/// Recovery order:
+/// 1. the value itself when it is an array;
+/// 2. a known wrapper key holding an array (first match in `WRAPPER_KEYS`);
+/// 3. a flat single-classification object (has `article_id` / `articleId`);
+/// 4. the local `{"0":"art-1", "classification": ...}` shape, where the first
+///    numeric key maps to the article id;
+/// 5. any other array-valued property (arbitrary model-invented wrapper).
+///
+/// Returns `None` when the value is neither an array nor any recoverable
+/// object, so the caller's shape error fires.
+fn resolve_array(value: &serde_json::Value) -> Option<Cow<'_, serde_json::Value>> {
+    use serde_json::Value;
+
     if value.is_array() {
-        Some(value)
-    } else if let Some(obj) = value.as_object() {
-        // Find the first present wrapper key whose value is an array. A
-        // wrapper object with a non-array value under a known key is treated
-        // as not-a-match so the caller's "unknown wrapper" error fires.
-        for key in WRAPPER_KEYS {
-            if let Some(inner) = obj.get(*key) {
-                if inner.is_array() {
-                    return Some(inner);
-                }
+        return Some(Cow::Borrowed(value));
+    }
+    let obj = value.as_object()?;
+    for key in WRAPPER_KEYS {
+        if let Some(inner) = obj.get(*key) {
+            if inner.is_array() {
+                return Some(Cow::Borrowed(inner));
             }
         }
-        None
-    } else {
-        None
     }
+    /* Flat single-object rescues run BEFORE the generic array-property scan:
+    a flat classification object also carries array-valued fields (e.g.
+    `justifying_sentences`), and the generic scan would hijack those as the
+    result array. */
+    if obj.contains_key("article_id") || obj.contains_key("articleId") {
+        return Some(Cow::Owned(Value::Array(vec![value.clone()])));
+    }
+    if let Some((first_key, first_value)) = obj.iter().next() {
+        if first_key.parse::<usize>().is_ok() {
+            if let Some(article_id) = first_value.as_str() {
+                let mut fixed = obj.clone();
+                fixed.remove(first_key);
+                fixed.insert("article_id".to_string(), Value::String(article_id.to_string()));
+                return Some(Cow::Owned(Value::Array(vec![Value::Object(fixed)])));
+            }
+        }
+    }
+    if let Some(inner) = obj.values().find(|v| v.is_array()) {
+        return Some(Cow::Borrowed(inner));
+    }
+    None
+}
+
+/// Lenient parser for the claim-splitter response.
+///
+/// The local `json_object` grammar cannot emit the bare `["claim", ...]` the
+/// prompt historically requested, so this accepts the same object shapes as
+/// `parse_citation_outputs` (wrapper key, arbitrary array property) and then
+/// keeps only string elements. A non-empty array with no string elements is
+/// an error; an empty array is a valid empty claim list. Pure (no I/O).
+pub fn parse_claim_list(raw: &str) -> Result<Vec<String>, serde_json::Error> {
+    let value: serde_json::Value = serde_json::from_str(raw)?;
+    let array_value = resolve_array(&value).ok_or_else(|| {
+        serde_json::Error::custom(
+            "expected a JSON array or an object containing an array of claim strings",
+        )
+    })?;
+    let array = array_value
+        .as_array()
+        .ok_or_else(|| serde_json::Error::custom("resolved value is not a JSON array"))?;
+    let claims: Vec<String> = array.iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+    if claims.is_empty() && !array.is_empty() {
+        return Err(serde_json::Error::custom("claim array contained no string elements"));
+    }
+    Ok(claims)
 }
 
 // Unit tests live in `src-tauri/tests/citation_finder/citation_finder_prompt_test.rs`

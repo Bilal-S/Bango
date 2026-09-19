@@ -95,8 +95,9 @@ pub fn default_embedding_model(provider: &LlmProvider) -> Option<&'static str> {
         LlmProvider::Ollama | LlmProvider::LmStudio | LlmProvider::LlamaCpp => None,
         // Custom endpoints: try the configured chat model.
         LlmProvider::Custom => None,
-        // Known unsupported.
-        LlmProvider::Anthropic | LlmProvider::ZAi => None,
+        // Known unsupported (Bango AI is generation-only: the llama-server
+        // embeddings endpoint is a non-goal).
+        LlmProvider::Anthropic | LlmProvider::ZAi | LlmProvider::BangoAi => None,
     }
 }
 
@@ -171,7 +172,10 @@ pub fn embedding_limits(provider: &LlmProvider, model: &str) -> EmbeddingLimits 
             max_tokens_per_input: 2048, // text-embedding-004
             max_tokens_per_batch: 2048,
         },
-        LlmProvider::Ollama | LlmProvider::LmStudio | LlmProvider::LlamaCpp => {
+        LlmProvider::Ollama
+        | LlmProvider::LmStudio
+        | LlmProvider::LlamaCpp
+        | LlmProvider::BangoAi => {
             // Local servers: assume small per-input + small batch unless the
             // model name signals a known large-context family.
             let max_tokens_per_input = if model.contains("nomic") {

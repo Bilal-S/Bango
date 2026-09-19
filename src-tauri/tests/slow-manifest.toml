@@ -14,8 +14,12 @@
 
 [[area]]
 name = "llm"
-paths = ["src/llm/**", "src/models/llm_config*"]
+# src/commands/bango_ai.rs lands at T5; forward-referenced so slow gating is correct from day one.
+paths = ["src/llm/**", "src/models/llm_config*", "src/local_ai/**", "src/commands/bango_ai.rs"]
 tests = [
+    "bango_ai_live_test::bango_ai_runtime_install_and_version",
+    "bango_ai_live_test::bango_ai_ornith_acceptance_smoke",
+    "bango_ai_live_test::bango_ai_engine_idle_stop_with_override",
     "llm_orchestrator_test::test_connection_fails_on_unreachable_endpoint",
     "llm_orchestrator_test::concurrent_sends_do_not_deadlock",
     "llm_orchestrator_test::concurrent_sends_with_delay_do_not_deadlock",

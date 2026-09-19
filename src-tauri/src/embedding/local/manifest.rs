@@ -15,22 +15,18 @@
 use serde::{Deserialize, Serialize};
 
 use crate::embedding::local::profile::LOCAL_PROFILE_ID;
+use crate::local_ai::manifest::{
+    is_archive_safe_path, is_path_safe_file_name, is_valid_sha256_hex, required_disk_bytes,
+    url_uses_allowed_scheme,
+};
 
-/// One pinned artifact file.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ManifestFile {
-    /// Destination file name inside the profile directory (flat, path-safe).
-    pub name: String,
-    /// Pinned absolute HTTPS download URL.
-    pub url: String,
-    /// Exact expected size in bytes.
-    pub size: u64,
-    /// Pinned SHA-256 (64 lowercase hex chars). `None` = verify by size
-    /// only (unused by the pinned manifest, which pins all six files; the
-    /// variant remains for future artifacts without published hashes).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sha256: Option<String>,
-}
+/// The shared pinned-file shape. Kept under its historical name for the
+/// embedding module's public API; the definition lives in
+/// `local_ai::manifest::PinnedFile`.
+pub use crate::local_ai::manifest::PinnedFile as ManifestFile;
+
+/// Target mapping re-export (definition lives in `local_ai::manifest`).
+pub use crate::local_ai::manifest::target_id;
 
 /// One pinned runtime archive for a single target triple.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -181,22 +177,6 @@ pub const LOCAL_COMPONENT_MANIFEST_JSON: &str = r#"{
   }
 }"#;
 
-/// URL scheme policy: HTTPS everywhere except plain-HTTP loopback hosts,
-/// which exist for test mocks and local mirrors (the pinned manifest is
-/// embedded in the binary, so the rule guards against accidental plaintext
-/// external fetches, not adversarial edits). The loopback prefixes must end
-/// at a host boundary (`:` port, `/` path, or end of string) so lookalike
-/// domains (`http://localhost.evil.com`) are rejected.
-fn url_uses_allowed_scheme(url: &str) -> bool {
-    if url.starts_with("https://") {
-        return true;
-    }
-    ["http://127.0.0.1", "http://localhost"].iter().any(|prefix| match url.strip_prefix(prefix) {
-        Some(rest) => rest.is_empty() || rest.starts_with(':') || rest.starts_with('/'),
-        None => false,
-    })
-}
-
 /// Parse + validate a pinned manifest JSON string: structural validation,
 /// well-formed source revision, and profile identity matching
 /// [`LOCAL_PROFILE_ID`]. Fails only if the input is malformed or drifted
@@ -239,14 +219,7 @@ impl ComponentManifest {
         let mut names = std::collections::HashSet::new();
         for file in &self.files {
             let name = file.name.trim();
-            if name.is_empty()
-                || name == "."
-                || name == ".."
-                || name.starts_with('.')
-                || name.contains('/')
-                || name.contains('\\')
-                || name.contains(':')
-            {
+            if !is_path_safe_file_name(name) {
                 return Err(format!("file name is not path-safe: '{}'", file.name));
             }
             if !names.insert(file.name.clone()) {
@@ -259,9 +232,7 @@ impl ComponentManifest {
                 return Err(format!("size must be positive: '{}'", file.name));
             }
             if let Some(hash) = &file.sha256 {
-                let well_formed = hash.len() == 64
-                    && hash.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c));
-                if !well_formed {
+                if !is_valid_sha256_hex(hash) {
                     return Err(format!(
                         "sha256 must be 64 lowercase hex chars for '{}'",
                         file.name
@@ -281,9 +252,7 @@ impl ComponentManifest {
                 if !targets.insert(file.target.clone()) {
                     return Err(format!("duplicate runtime target: '{}'", file.target));
                 }
-                let well_formed = file.sha256.len() == 64
-                    && file.sha256.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c));
-                if !well_formed {
+                if !is_valid_sha256_hex(&file.sha256) {
                     return Err(format!(
                         "runtime sha256 must be 64 lowercase hex chars for '{}'",
                         file.name
@@ -296,11 +265,7 @@ impl ComponentManifest {
                     return Err(format!("runtime libSize must be positive: '{}'", file.name));
                 }
                 let lib = file.lib_path.trim();
-                if lib.is_empty()
-                    || lib.starts_with('/')
-                    || lib.contains("..")
-                    || lib.contains('\\')
-                {
+                if !is_archive_safe_path(lib) {
                     return Err(format!("runtime libPath is not archive-safe: '{lib}'"));
                 }
             }
@@ -321,9 +286,7 @@ impl ComponentManifest {
     /// the current target's runtime archive.
     #[must_use]
     pub fn required_disk_bytes(&self, existing_install: bool) -> u64 {
-        let total = self.total_install_bytes();
-        let copies = u64::from(existing_install);
-        (total * (1 + copies)) + std::cmp::max(64 * 1024 * 1024, total / 10)
+        required_disk_bytes(self.total_install_bytes(), existing_install)
     }
 
     /// Look up a file by destination name.
@@ -353,17 +316,6 @@ impl ComponentManifest {
     #[must_use]
     pub fn total_install_bytes(&self) -> u64 {
         self.total_download_bytes() + self.runtime_file_for_current_target().map_or(0, |f| f.size)
-    }
-}
-
-/// Pure mapping of (os, arch) to the manifest's target identifiers.
-#[must_use]
-pub fn target_id(os: &str, arch: &str) -> Option<&'static str> {
-    match (os, arch) {
-        ("windows", "x86_64") => Some("win-x64"),
-        ("macos", "aarch64") => Some("osx-arm64"),
-        ("linux", "x86_64") => Some("linux-x64"),
-        _ => None,
     }
 }
 

@@ -489,6 +489,79 @@ pub fn set_embedding_backend(
     set_setting(conn, EMBEDDING_BACKEND_KEY, Some(backend.as_str()))
 }
 
+// ── LLM generation backend (Configured Provider / Bango AI) ──────────────────
+
+/// `app_settings` key selecting which backend serves generation calls.
+///
+/// `configured_provider` (default) follows the configured LLM provider;
+/// `bango_ai` runs on-device inference via the downloaded llama.cpp runtime +
+/// Ornith model. The domain type lives in `llm::backend`; this repo owns only
+/// the key's persistence. Project-portable: the preference travels with a
+/// project backup (an imported selection never implies readiness - components
+/// and engine health stay machine-evaluated).
+pub const LLM_BACKEND_KEY: &str = "llm_backend";
+
+/// Read the LLM backend selection. Defaults to `ConfiguredProvider`.
+pub fn get_llm_backend(conn: &Connection) -> Result<crate::llm::backend::LlmBackend, AppError> {
+    Ok(crate::llm::backend::LlmBackend::parse(get_setting(conn, LLM_BACKEND_KEY)?.as_deref()))
+}
+
+/// Persist the LLM backend selection.
+pub fn set_llm_backend(
+    conn: &Connection,
+    backend: crate::llm::backend::LlmBackend,
+) -> Result<(), AppError> {
+    set_setting(conn, LLM_BACKEND_KEY, Some(backend.as_str()))
+}
+
+// ── Bango AI engine settings (machine-local) ────────────────────────────────
+
+/// `app_settings` key for the local context window (tokens).
+pub const BANGO_AI_CONTEXT_KEY: &str = "bango_ai_context";
+/// `app_settings` key for the local generation thread budget.
+pub const BANGO_AI_THREADS_KEY: &str = "bango_ai_threads";
+/// `app_settings` key for the prose "extended reasoning" toggle.
+pub const BANGO_AI_REASONING_KEY: &str = "bango_ai_reasoning";
+
+/// Machine-local engine settings. Missing/garbage values fall back to the
+/// recommended defaults; values are clamped to the allowed ranges so a
+/// corrupted row can never configure an unusable engine.
+pub fn get_bango_ai_settings(
+    conn: &Connection,
+) -> Result<crate::llm::local::policy::EngineSettings, AppError> {
+    use crate::llm::local::policy::{clamp_context, EngineSettings, MAX_LLM_THREADS};
+    // RAM-aware defaults for missing keys (a 61 GB machine must never inherit
+    // a hardcoded 16k): one recommendation per read, persisted keys win.
+    let recommended = {
+        let hardware = crate::llm::local::hardware::detect();
+        crate::llm::local::policy::recommend_settings(hardware.total_ram_mb, hardware.cpu_cores)
+    };
+    let context = get_setting(conn, BANGO_AI_CONTEXT_KEY)?
+        .and_then(|value| value.parse::<i32>().ok())
+        .map_or(recommended.context, clamp_context);
+    let threads = get_setting(conn, BANGO_AI_THREADS_KEY)?
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(recommended.threads)
+        .clamp(1, MAX_LLM_THREADS);
+    let reasoning = get_setting(conn, BANGO_AI_REASONING_KEY)?.as_deref() == Some("true");
+    Ok(EngineSettings { context, threads, reasoning })
+}
+
+/// Persist machine-local engine settings.
+pub fn set_bango_ai_settings(
+    conn: &Connection,
+    settings: &crate::llm::local::policy::EngineSettings,
+) -> Result<(), AppError> {
+    set_setting(conn, BANGO_AI_CONTEXT_KEY, Some(&settings.context.to_string()))?;
+    set_setting(conn, BANGO_AI_THREADS_KEY, Some(&settings.threads.to_string()))?;
+    set_setting(
+        conn,
+        BANGO_AI_REASONING_KEY,
+        Some(if settings.reasoning { "true" } else { "false" }),
+    )?;
+    Ok(())
+}
+
 // ── Project name (editable dashboard title) ─────────────────────────────────
 
 /// `app_settings` key for the user-editable project name shown in the
@@ -540,6 +613,7 @@ pub const PROJECT_PORTABLE_SETTINGS: &[&str] = &[
     "openalex_mailto",
     "openalex_retrieve_references",
     EMBEDDING_BACKEND_KEY,
+    LLM_BACKEND_KEY,
     PROJECT_NAME_KEY,
 ];
 

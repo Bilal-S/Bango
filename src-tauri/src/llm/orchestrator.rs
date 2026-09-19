@@ -34,6 +34,54 @@ pub trait TemperatureFlagPersister: Send + Sync {
     fn persist(&self, skip: bool);
 }
 
+/// Live local config provider (Bango AI). Production wraps the engine and
+/// starts it on demand; tests inject stubs. Returns `None` when the local
+/// backend is not active.
+pub trait LocalConfigProvider: Send + Sync {
+    fn effective_local_config<'a>(
+        &'a self,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Option<LlmConfig>, AppError>> + Send + 'a>,
+    >;
+
+    /// Whether the prose "extended reasoning" toggle is on.
+    fn reasoning_enabled(&self) -> bool {
+        false
+    }
+
+    /// In-flight accounting hook (engine busy state + reset drain).
+    fn note_request_start(&self) {}
+
+    /// In-flight accounting hook; must balance every `note_request_start`.
+    fn note_request_end(&self) {}
+}
+
+/// Local requests get a much longer wall-clock budget: a 9B CPU model can
+/// exceed every cloud per-type cap (screening 120 s, split 60 s).
+pub const LOCAL_TIMEOUT_SECS: u64 = 1800;
+
+/// Wall-clock timeout for one call: the single local override or the cloud
+/// per-request-type value.
+#[must_use]
+pub fn resolve_timeout(request_type: &LlmRequestType, local: bool) -> Duration {
+    if local {
+        Duration::from_secs(LOCAL_TIMEOUT_SECS)
+    } else {
+        timeout_for(request_type)
+    }
+}
+
+/// Wire options for one call: structured calls force thinking off; prose
+/// calls honor the "extended reasoning" toggle (off = force thinking off,
+/// on = leave the server default).
+#[must_use]
+pub fn local_request_options(json_mode: bool, reasoning_enabled: bool) -> client::RequestOptions {
+    client::RequestOptions {
+        json_mode,
+        enable_thinking: if json_mode || !reasoning_enabled { Some(false) } else { None },
+    }
+}
+
 /// Maximum time to wait for a single LLM response (default for all request
 /// types except screening).
 const LLM_TIMEOUT_SECS: u64 = 600;
@@ -128,6 +176,25 @@ pub struct LlmOrchestrator {
     /// so subsequent calls omit `temperature` from the start. Lock-free; complements
     /// DB persistence for in-memory config caches.
     temperature_rejected_in_session: AtomicBool,
+    /// Active generation backend (T6). Local requests route through
+    /// `local_provider` and never persist cloud temperature flags.
+    backend: RwLock<crate::llm::backend::LlmBackend>,
+    /// Live local config provider, wired at startup (`Arc<BangoAiEngine>`).
+    local_provider: RwLock<Option<Arc<dyn LocalConfigProvider>>>,
+}
+
+/// Releases the local in-flight slot on drop so every exit path (success,
+/// error, timeout) balances `note_request_start`.
+struct InFlightGuard {
+    provider: Option<Arc<dyn LocalConfigProvider>>,
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        if let Some(provider) = &self.provider {
+            provider.note_request_end();
+        }
+    }
 }
 
 /// No-op persister used when no DB is available (tests, or pre-wiring).
@@ -153,6 +220,44 @@ impl LlmOrchestrator {
             request_delay_ms: Arc::new(tokio::sync::Mutex::new(request_delay_ms)),
             temp_persister: RwLock::new(None),
             temperature_rejected_in_session: AtomicBool::new(false),
+            backend: RwLock::new(crate::llm::backend::LlmBackend::default()),
+            local_provider: RwLock::new(None),
+        }
+    }
+
+    /// The active generation backend.
+    #[must_use]
+    pub fn backend(&self) -> crate::llm::backend::LlmBackend {
+        *self.backend.read().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Wire the live local config provider (production: engine-backed).
+    pub fn set_local_config_provider(&self, provider: Arc<dyn LocalConfigProvider>) {
+        *self.local_provider.write().unwrap_or_else(|p| p.into_inner()) = Some(provider);
+    }
+
+    /// Startup-only synchronous backend set: no requests are in flight yet
+    /// and the semaphore was sized for this backend at construction.
+    pub fn set_backend_initial(&self, backend: crate::llm::backend::LlmBackend) {
+        *self.backend.write().unwrap_or_else(|p| p.into_inner()) = backend;
+    }
+
+    /// Switch the generation backend and reconfigure the semaphore/delay:
+    /// local calls run serialized (concurrency 1, no pacing); switching back
+    /// restores the stored cloud limits.
+    pub async fn set_backend(
+        &self,
+        backend: crate::llm::backend::LlmBackend,
+        stored: Option<&LlmConfig>,
+    ) {
+        *self.backend.write().unwrap_or_else(|p| p.into_inner()) = backend;
+        match backend {
+            crate::llm::backend::LlmBackend::BangoAi => self.update_settings(1, 0).await,
+            crate::llm::backend::LlmBackend::ConfiguredProvider => {
+                let max = stored.map_or(3, |c| c.max_concurrent_requests.max(1) as usize);
+                let delay = stored.map_or(500, |c| c.request_delay_ms.max(0) as u64);
+                self.update_settings(max, delay).await;
+            }
         }
     }
 
@@ -211,19 +316,59 @@ impl LlmOrchestrator {
         *self.request_delay_ms.lock().await = request_delay_ms;
     }
 
-    /// Send a chat completion request through the orchestrator.
-    /// Enforces concurrency limits + rate limiting + per-request-type timeout.
-    /// Send a chat completion and also return the [`client::CallMeta`]
-    /// side-channel (truncation, rejection recovery). Wiki ingest uses this
-    /// to detect output-budget truncation; `send` drops the meta for
-    /// existing callers.
-    pub async fn send_with_meta(
+    /// Send a chat completion request through the orchestrator with explicit
+    /// wire options (`json_mode`). Enforces concurrency limits + rate limiting
+    /// + per-request-type timeout.
+    pub async fn send_with_meta_opts(
         &self,
         config: &LlmConfig,
         system_prompt: &str,
         user_prompt: &str,
         request_type: LlmRequestType,
+        json_mode: bool,
     ) -> Result<(String, usize, client::CallMeta), AppError> {
+        let local = self.backend() == crate::llm::backend::LlmBackend::BangoAi;
+        let provider = if local {
+            self.local_provider.read().unwrap_or_else(|p| p.into_inner()).clone()
+        } else {
+            None
+        };
+        // Local in-flight accounting (engine busy state + reset drain): the
+        // request counts from before the local config resolution AND the
+        // permit wait, so a cold start is visible to `reset_off_thread` too
+        // (queued and starting requests keep the server alive) until the guard
+        // drops on any exit (aifixes1 F7).
+        let _in_flight_guard = InFlightGuard { provider: provider.clone() };
+        if let Some(in_flight) = &_in_flight_guard.provider {
+            in_flight.note_request_start();
+        }
+        let local_config: Option<LlmConfig> = if local {
+            let Some(provider) = &provider else {
+                return Err(AppError::Import(
+                    "Bango AI is selected but the local engine is not available. Restart the app \
+                     or reinstall Bango AI."
+                        .to_string(),
+                ));
+            };
+            let Some(config) = provider.effective_local_config().await? else {
+                return Err(AppError::Import(
+                    "Bango AI is selected but its components are not ready. Set up Bango AI in \
+                     Settings or switch back to the configured provider."
+                        .to_string(),
+                ));
+            };
+            Some(config)
+        } else {
+            None
+        };
+        let reasoning_enabled = provider.as_ref().is_some_and(|p| p.reasoning_enabled());
+        let options = if local {
+            local_request_options(json_mode, reasoning_enabled)
+        } else {
+            client::RequestOptions::default()
+        };
+        let config_ref = local_config.as_ref().unwrap_or(config);
+
         // 1. Acquire semaphore permit (waits if at concurrency limit).
         // Clone the Arc under a brief read lock, then drop the guard before
         // awaiting so update_settings is never blocked by an active request.
@@ -236,26 +381,28 @@ impl LlmOrchestrator {
         // 2. Rate limiting: ensure minimum delay between requests
         self.enforce_rate_limit().await;
 
-        /* If a prior call in this session discovered temperature rejection,
-        clone config with skip_temperature = true so this call omits the
-        parameter from the start. Session latch complements DB persistence
-        for in-memory config caches (screening engine, etc.). */
+        /* If a prior CLOUD call in this session discovered temperature
+        rejection, clone config with skip_temperature = true so this call omits
+        the parameter from the start. Local calls neither consult nor set the
+        latch: it belongs to the cloud row (decision: no local persistence). */
         let effective_config: LlmConfig;
-        let config_ref = if self.temperature_rejected_in_session.load(Ordering::Relaxed)
-            && !config.skip_temperature
+        let config_ref = if !local
+            && self.temperature_rejected_in_session.load(Ordering::Relaxed)
+            && !config_ref.skip_temperature
         {
             effective_config = {
-                let mut c = config.clone();
+                let mut c = config_ref.clone();
                 c.skip_temperature = true;
                 c
             };
             &effective_config
         } else {
-            config
+            config_ref
         };
 
-        // 4. Make the actual LLM call with a per-request-type timeout.
-        let timeout = timeout_for(&request_type);
+        // 4. Make the actual LLM call with a per-request-type timeout (local
+        // requests use the single 1800 s local override).
+        let timeout = resolve_timeout(&request_type, local);
         let timeout_secs = timeout.as_secs();
         eprintln!(
             "[screening:diag] orchestrator: LLM call START type={request_type:?} timeout={timeout_secs}s"
@@ -263,7 +410,7 @@ impl LlmOrchestrator {
         let call_start = std::time::Instant::now();
         let result = tokio::time::timeout(
             timeout,
-            client::send_chat_completion(config_ref, system_prompt, user_prompt),
+            client::send_chat_completion_with_options(config_ref, system_prompt, user_prompt, options),
         )
         .await
         .map_err(|_| {
@@ -279,10 +426,13 @@ impl LlmOrchestrator {
             call_start.elapsed().as_millis()
         );
 
-        /* Unpack the (content, tokens, CallMeta) 3-tuple, persist temperature
-        flag on recovery, and centralize error logging. */
+        /* Unpack the (content, tokens, CallMeta) 3-tuple, persist the cloud
+        temperature flag on recovery (never for local calls), and centralize
+        error logging. */
         let result = result.map(|(content, tokens, meta)| {
-            self.maybe_persist_skip_temperature(meta.clone());
+            if !local {
+                self.maybe_persist_skip_temperature(meta.clone());
+            }
             (content, tokens, meta)
         });
 
@@ -294,6 +444,17 @@ impl LlmOrchestrator {
         result
     }
 
+    /// Default-options wrapper (cloud-compatible behavior).
+    pub async fn send_with_meta(
+        &self,
+        config: &LlmConfig,
+        system_prompt: &str,
+        user_prompt: &str,
+        request_type: LlmRequestType,
+    ) -> Result<(String, usize, client::CallMeta), AppError> {
+        self.send_with_meta_opts(config, system_prompt, user_prompt, request_type, false).await
+    }
+
     /// Prose-call wrapper around [`Self::send_with_meta`] that drops the
     /// `CallMeta` side-channel (pre-existing caller contract).
     pub async fn send(
@@ -303,13 +464,28 @@ impl LlmOrchestrator {
         user_prompt: &str,
         request_type: LlmRequestType,
     ) -> Result<(String, usize), AppError> {
-        let (content, tokens, _meta) =
-            self.send_with_meta(config, system_prompt, user_prompt, request_type).await?;
+        self.send_opts(config, system_prompt, user_prompt, request_type, false).await
+    }
+
+    /// Option-carrying wrapper that drops the `CallMeta` side-channel. The
+    /// screening client uses this with `json_mode = true` and runs its own
+    /// array-aware `extract_json` (no double `prepare_llm_json` pass).
+    pub async fn send_opts(
+        &self,
+        config: &LlmConfig,
+        system_prompt: &str,
+        user_prompt: &str,
+        request_type: LlmRequestType,
+        json_mode: bool,
+    ) -> Result<(String, usize), AppError> {
+        let (content, tokens, _meta) = self
+            .send_with_meta_opts(config, system_prompt, user_prompt, request_type, json_mode)
+            .await?;
         Ok((content, tokens))
     }
 
     /// Send a chat completion whose response is expected to be JSON. Chains
-    /// [`send`](Self::send) with `prepare_llm_json` (strips code fences, escapes
+    /// the call with `prepare_llm_json` (strips code fences, escapes
     /// raw control chars in strings). Returned `String` is ready for `serde_json::from_str`.
     ///
     /// JSON-returning callers (summaries, criteria, smart search, etc.) MUST use
@@ -321,7 +497,8 @@ impl LlmOrchestrator {
         user_prompt: &str,
         request_type: LlmRequestType,
     ) -> Result<(String, usize), AppError> {
-        let (raw, tokens) = self.send(config, system_prompt, user_prompt, request_type).await?;
+        let (raw, tokens) =
+            self.send_opts(config, system_prompt, user_prompt, request_type, true).await?;
         Ok((prepare_llm_json(&raw), tokens))
     }
 
@@ -440,8 +617,11 @@ impl LlmOrchestrator {
         // flag - leaving screening batch 1 to rediscover the rejection.
         // The DB persistence is owned by `test_llm_connection` (it saves the
         // full config row so it can show the auto-adjusted toast); here we only
-        // flip the orchestrator's in-memory latch.
-        if meta.temperature_was_rejected {
+        // flip the orchestrator's in-memory latch. Local (Bango AI) configs
+        // never latch: the flag belongs to the stored cloud row (aifixes1 F14).
+        if meta.temperature_was_rejected
+            && config.provider != crate::models::llm_config::LlmProvider::BangoAi
+        {
             self.temperature_rejected_in_session.store(true, Ordering::Relaxed);
         }
         Ok((content, tokens, meta))

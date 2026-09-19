@@ -9,7 +9,6 @@ use crate::db::article_repo;
 use crate::db::audit_repo;
 use crate::db::connection::{lock_conn, DbState};
 use crate::db::criteria_repo;
-use crate::db::llm_config_repo;
 use crate::db::tag_repo;
 use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
@@ -169,7 +168,7 @@ pub async fn suggest_tags(
     let (config, top_cited_full, next_cited_titles, keywords_str, criteria_text) = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
-        let config = llm_config_repo::get_config(&conn)?
+        let config = crate::llm::effective_config::resolve(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
 
         let articles = article_repo::get_articles_by_status(&conn, "working")?;

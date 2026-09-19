@@ -4,7 +4,6 @@ use tauri::State;
 
 use crate::db::article_repo;
 use crate::db::connection::DbState;
-use crate::db::llm_config_repo;
 use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::models::article::Article;
@@ -55,7 +54,7 @@ pub async fn send_chat_message(
 ) -> Result<String, AppError> {
     let config = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        llm_config_repo::get_config(&conn)?.ok_or_else(|| {
+        crate::llm::effective_config::resolve(&conn)?.ok_or_else(|| {
             AppError::Validation(
                 "LLM not configured. Please set up LLM configuration first.".to_string(),
             )

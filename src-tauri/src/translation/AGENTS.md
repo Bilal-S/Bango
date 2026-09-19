@@ -138,12 +138,15 @@ preserved in `article_original_content` and `article_original_chunks`.
   high-concurrency config parallelizes automatically. The resend round is a
   follow-up `join_all` after the prior round completes. The metadata LLM
   call (title + abstract) still runs sequentially before chunk dispatch.
-- **`context_window_tokens` plumbing**: the worker extracts
-  `config.context_window_tokens` from the concrete `LlmConfig` BEFORE
-  constructing the `TranslationLlmClient` and passes it as a fourth
-  parameter to `translate_full_text`. It cannot be read inside the engine
-  from the `&dyn LlmClient` trait object (the trait has no config
-  accessor; widening it would pollute `screening::llm_client`).
+- **`context_window_tokens` plumbing**: the worker resolves the effective
+  generation config + context through `resolve_translation_llm` (skip when
+  `llm::readiness::has_usable_llm` is false) BEFORE constructing the
+  `TranslationLlmClient` and passes the context as a fourth parameter to
+  `translate_full_text`. Under `bango_ai` the local config and local context
+  window apply; under `configured_provider` the stored cloud row does. The
+  value cannot be read inside the engine from the `&dyn LlmClient` trait
+  object (the trait has no config accessor; widening it would pollute
+  `screening::llm_client`).
 - **Error handling**: an LLM error on any batch fails the whole job
   (mirrors the previous fail-on-first-error semantics); other in-flight
   batches in the same round complete harmlessly (bounded by the

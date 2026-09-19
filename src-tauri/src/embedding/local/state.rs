@@ -15,52 +15,15 @@ use std::path::Path;
 use crate::embedding::local::manifest::ComponentManifest;
 use crate::embedding::local::profile::LOCAL_PROFILE_DIR;
 
-/// Lifecycle state of the local embedding components.
-///
-/// The command layer derives `installing` (running flag) and `unsupported`
-/// (target gate) on top of these probe states; in-progress phases stay
-/// event-driven (`embedding:component` progress events). This is the final
-/// design - persisted transitions were considered and rejected (a persisted
-/// `downloading` would be stale-on-restart noise).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LocalEmbeddingState {
-    /// No installation found at the resolved model root.
-    NotInstalled,
-    /// Some installation artifacts exist but the fast health check fails
-    /// (missing/short file, or missing manifest) - re-running the install
-    /// repairs it.
-    RepairRequired,
-    /// A profile directory with an installation manifest exists.
-    Ready,
-}
-
-impl LocalEmbeddingState {
-    /// Serialized form for command payloads (`not_installed` |
-    /// `repair_required` | `ready`).
-    #[must_use]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::NotInstalled => "not_installed",
-            Self::RepairRequired => "repair_required",
-            Self::Ready => "ready",
-        }
-    }
-
-    /// Human phrase describing a not-ready state for user-facing error
-    /// messages (never a Debug-formatted enum name like `RepairRequired`).
-    #[must_use]
-    pub fn not_ready_phrase(self) -> &'static str {
-        match self {
-            Self::RepairRequired => "some files are missing or incomplete",
-            Self::NotInstalled => "the components are missing",
-            Self::Ready => "the components are ready",
-        }
-    }
-}
+/// Lifecycle state of the local embedding components. The generic assessment
+/// enum (and its `as_str` / `not_ready_phrase` methods) lives in
+/// `local_ai::state`; this alias keeps the historical name for the embedding
+/// module and its tests.
+pub type LocalEmbeddingState = crate::local_ai::state::Assessment;
 
 /// Installation manifest file name inside the profile directory
 /// (`<model_root>/<profile>/manifest.json`).
-pub const INSTALL_MANIFEST_NAME: &str = "manifest.json";
+pub use crate::local_ai::download::INSTALL_MANIFEST_NAME;
 
 /// Cheap gate for the service router: can the local backend possibly run?
 /// Checks only the expected profile directory's manifest (no file sizes, no
@@ -85,23 +48,14 @@ pub fn probe_installation_state(model_root: &Path) -> LocalEmbeddingState {
 pub fn assess_installation(model_root: &Path, manifest: &ComponentManifest) -> LocalEmbeddingState {
     let final_dir = model_root.join(LOCAL_PROFILE_DIR);
     let manifest_ok = installed_manifest_records_profile(&final_dir, &manifest.profile);
-    let files_ok = manifest.files.iter().all(|f| {
-        std::fs::metadata(final_dir.join(&f.name)).is_ok_and(|m| m.is_file() && m.len() == f.size)
-    });
-    match (manifest_ok, files_ok) {
-        (true, true) => LocalEmbeddingState::Ready,
-        (false, false) => {
-            // A crashed promote parks the working copy under
-            // `.staging/replaced-*`: artifacts exist even though the profile
-            // directory is gone, so this is repairable, not absent.
-            if has_stranded_replaced_park(model_root) {
-                LocalEmbeddingState::RepairRequired
-            } else {
-                LocalEmbeddingState::NotInstalled
-            }
-        }
-        _ => LocalEmbeddingState::RepairRequired,
-    }
+    let expected: Vec<(&str, u64)> =
+        manifest.files.iter().map(|f| (f.name.as_str(), f.size)).collect();
+    crate::local_ai::state::assess_pinned_files(
+        &final_dir,
+        &model_root.join(crate::local_ai::download::STAGING_DIR_NAME),
+        &expected,
+        manifest_ok,
+    )
 }
 
 /// Whether the installed `manifest.json` parses and records `active_profile`.
@@ -114,19 +68,6 @@ fn installed_manifest_records_profile(final_dir: &Path, active_profile: &str) ->
         Ok(installed) => installed.profile == active_profile,
         Err(_) => false,
     }
-}
-
-/// Whether a crashed promote left a parked working install under
-/// `.staging/replaced-*`.
-fn has_stranded_replaced_park(model_root: &Path) -> bool {
-    let Ok(entries) =
-        std::fs::read_dir(model_root.join(crate::embedding::local::download::STAGING_DIR_NAME))
-    else {
-        return false;
-    };
-    entries
-        .filter_map(std::result::Result::ok)
-        .any(|entry| entry.file_name().to_string_lossy().starts_with("replaced-"))
 }
 
 #[cfg(test)]

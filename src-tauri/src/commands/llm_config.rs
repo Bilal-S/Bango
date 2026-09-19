@@ -310,5 +310,5 @@ pub async fn list_llm_models(
 #[tauri::command]
 pub fn has_llm_config(db_state: State<'_, DbState>) -> Result<bool, AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    llm_config_repo::has_config(&conn)
+    crate::llm::readiness::has_usable_llm(&conn)
 }

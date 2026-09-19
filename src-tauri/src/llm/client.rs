@@ -18,6 +18,33 @@ struct ChatRequest {
     messages: Vec<ChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<ResponseFormat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_template_kwargs: Option<ChatTemplateKwargs>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+struct ResponseFormat {
+    #[serde(rename = "type")]
+    kind: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+struct ChatTemplateKwargs {
+    enable_thinking: bool,
+}
+
+/// Per-request wire options. Only the local Bango AI provider consumes them;
+/// cloud providers never receive these fields (`skip_temperature` is the
+/// field-rejection precedent).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RequestOptions {
+    /// Send `response_format: json_object` (llama-server grammar-backed).
+    pub json_mode: bool,
+    /// `Some(false)` sends `chat_template_kwargs.enable_thinking = false`;
+    /// `None` leaves the server default (thinking on).
+    pub enable_thinking: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -356,8 +383,12 @@ pub fn estimated_output_budget_tokens(config: &LlmConfig) -> usize {
         return 65_536;
     }
     match config.provider {
-        // Local endpoints usually default to small output budgets.
-        LlmProvider::Ollama | LlmProvider::LlamaCpp | LlmProvider::LmStudio => 8_192,
+        // Local endpoints usually default to small output budgets; Bango AI
+        // runs a 9B CPU model and is included with the local providers.
+        LlmProvider::Ollama
+        | LlmProvider::LlamaCpp
+        | LlmProvider::LmStudio
+        | LlmProvider::BangoAi => 8_192,
         // Hosted OpenAI-compatible providers default to the model max, which
         // is >= 32K for current-generation models; 32K is the conservative
         // planning number.
@@ -525,6 +556,16 @@ fn test_backoff_override_ms() -> Option<u64> {
     }
 }
 
+/// Char-boundary-safe truncation (byte-slicing a multi-byte UTF-8 body panics;
+/// aifixes1 F6). Returns the leading `max_chars` characters.
+#[must_use]
+fn truncate_chars(text: &str, max_chars: usize) -> &str {
+    match text.char_indices().nth(max_chars) {
+        Some((idx, _)) => &text[..idx],
+        None => text,
+    }
+}
+
 /// Parse `Retry-After` header (delta-seconds) as milliseconds.
 /// Capped at `LLM_MAX_BACKOFF_MS` so a misconfigured server can't stall indefinitely.
 fn parse_retry_after_ms(resp: &reqwest::Response) -> Option<u64> {
@@ -532,7 +573,13 @@ fn parse_retry_after_ms(resp: &reqwest::Response) -> Option<u64> {
         .get("retry-after")
         .and_then(|h| h.to_str().ok())
         .and_then(|s| s.trim().parse::<u64>().ok())
-        .map(|secs| (secs * 1000).min(LLM_MAX_BACKOFF_MS))
+        .map(retry_after_ms_from_secs)
+}
+
+/// Saturating seconds-to-milliseconds conversion (a hostile `Retry-After`
+/// near `u64::MAX` must not overflow; aifixes1 F6).
+fn retry_after_ms_from_secs(secs: u64) -> u64 {
+    secs.saturating_mul(1000).min(LLM_MAX_BACKOFF_MS)
 }
 
 /// Extract OpenAI/Cloudflare trace identifiers (`x-request-id`, `CF-Ray`) for
@@ -758,11 +805,54 @@ pub async fn send_chat_completion(
     system_prompt: &str,
     user_prompt: &str,
 ) -> Result<(String, usize, CallMeta), AppError> {
+    send_chat_completion_with_options(config, system_prompt, user_prompt, RequestOptions::default())
+        .await
+}
+
+/// Option-carrying variant used by the orchestrator (local engine options:
+/// JSON intent and thinking control).
+pub async fn send_chat_completion_with_options(
+    config: &LlmConfig,
+    system_prompt: &str,
+    user_prompt: &str,
+    options: RequestOptions,
+) -> Result<(String, usize, CallMeta), AppError> {
     match config.provider {
         LlmProvider::Google => send_google(config, system_prompt, user_prompt).await,
         LlmProvider::Anthropic => send_anthropic(config, system_prompt, user_prompt).await,
-        _ => send_openai_compatible(config, system_prompt, user_prompt).await,
+        _ => {
+            send_openai_compatible(config, system_prompt, user_prompt, options).await.map_err(|e| {
+                if config.provider == LlmProvider::BangoAi {
+                    map_bango_ai_error(e)
+                } else {
+                    e
+                }
+            })
+        }
     }
+}
+
+/// Whether an error message is a llama-server context-overflow 400
+/// (aifixes1 F3): wording varies across builds, so match the stable fragments.
+fn is_local_context_overflow(message: &str) -> bool {
+    message.contains("(400")
+        && (message.contains("exceeds the available context size")
+            || message.contains("context size")
+            || message.contains("n_ctx"))
+}
+
+/// Map a Bango AI failure to an actionable message where possible; everything
+/// else passes through untouched (aifixes1 F3: no raw `400` for local overflow).
+fn map_bango_ai_error(err: AppError) -> AppError {
+    let message = err.to_string();
+    if is_local_context_overflow(&message) {
+        return AppError::Import(
+            "Bango AI could not fit this prompt in the selected context. Reduce the Context \
+             setting or shorten the text."
+                .to_string(),
+        );
+    }
+    err
 }
 
 // ── Google path ──────────────────────────────────────────────────────
@@ -1033,6 +1123,7 @@ async fn send_openai_compatible(
     config: &LlmConfig,
     system_prompt: &str,
     user_prompt: &str,
+    options: RequestOptions,
 ) -> Result<(String, usize, CallMeta), AppError> {
     let system_prompt = normalize_llm_text(system_prompt);
     let user_prompt = normalize_llm_text(user_prompt);
@@ -1052,6 +1143,7 @@ async fn send_openai_compatible(
         | LlmProvider::LmStudio
         | LlmProvider::MistralAi
         | LlmProvider::ZAi
+        | LlmProvider::BangoAi
         | LlmProvider::Custom => {
             if base_url.ends_with("/chat/completions") {
                 base_url.to_string()
@@ -1069,6 +1161,14 @@ async fn send_openai_compatible(
     let model_name = config.model_name.clone();
     let system_text = system_prompt.to_string();
     let user_text = user_prompt.to_string();
+    let local = config.provider == LlmProvider::BangoAi;
+    let response_format =
+        (local && options.json_mode).then_some(ResponseFormat { kind: "json_object" });
+    let chat_template_kwargs = if local {
+        options.enable_thinking.map(|enable_thinking| ChatTemplateKwargs { enable_thinking })
+    } else {
+        None
+    };
 
     /* Build + send, then recover from temperature-rejection 400. Same envelope
     as `send_google`; the closure captures the OpenAI-compatible request shape. */
@@ -1088,6 +1188,8 @@ async fn send_openai_compatible(
                     ChatMessage { role: "user".to_string(), content: user_text },
                 ],
                 temperature: temp,
+                response_format,
+                chat_template_kwargs,
             };
             let builder = client
                 .post(&endpoint)
@@ -1127,7 +1229,7 @@ async fn send_openai_compatible(
             let content = extract_content_from_response(&value).ok_or_else(|| {
                 AppError::Import(format!(
                     "Could not extract content from LLM response. Raw body (first 500 chars): {}",
-                    &body_text[..body_text.len().min(500)]
+                    truncate_chars(&body_text, 500)
                 ))
             })?;
 
@@ -1269,6 +1371,43 @@ fn extract_total_tokens(value: &serde_json::Value) -> usize {
 mod tests {
     use super::*;
     use reqwest::StatusCode;
+
+    // ── aifixes1 F6: char-safe truncation + saturating Retry-After ─────
+
+    #[test]
+    fn truncate_chars_is_char_boundary_safe() {
+        let body = "中文错误".repeat(600);
+        let head = truncate_chars(&body, 500);
+        assert_eq!(head.chars().count(), 500, "exactly 500 chars");
+        assert!(body.starts_with(head), "prefix of the original body");
+        assert_eq!(truncate_chars("short", 500), "short");
+        assert_eq!(truncate_chars("", 500), "");
+    }
+
+    #[test]
+    fn retry_after_saturates_instead_of_overflowing() {
+        assert_eq!(retry_after_ms_from_secs(u64::MAX), LLM_MAX_BACKOFF_MS);
+        assert_eq!(retry_after_ms_from_secs(2), 2_000);
+    }
+
+    // ── aifixes1 F3: local context-overflow mapping ────────────────────
+
+    #[test]
+    fn bango_ai_overflow_maps_to_actionable_error() {
+        let mapped = map_bango_ai_error(AppError::Import(
+            "LLM request failed (400 Bad Request): prompt too large - exceeds the available \
+             context size (n_ctx)"
+                .to_string(),
+        ));
+        let text = mapped.to_string();
+        assert!(text.contains("Reduce the Context setting"), "got: {text}");
+
+        // Unrelated 400s pass through unchanged.
+        let untouched = map_bango_ai_error(AppError::Import(
+            "LLM request failed (400): invalid model".to_string(),
+        ));
+        assert!(untouched.to_string().contains("invalid model"));
+    }
 
     // ── normalize_llm_text ───────────────────────────────────────────
 

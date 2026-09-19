@@ -23,7 +23,6 @@ use std::time::Instant;
 use fastembed::{InitOptionsUserDefined, TextEmbedding, TokenizerFiles, UserDefinedEmbeddingModel};
 
 use crate::embedding::local::manifest::local_manifest;
-use crate::embedding::local::paths::resolve_ai_paths;
 use crate::embedding::local::profile::{
     LOCAL_EMBEDDING_DIMENSIONS, LOCAL_MAX_INPUT_TOKENS, LOCAL_PROFILE_DIR,
 };
@@ -31,6 +30,7 @@ use crate::embedding::local::prompt::{apply_role_prefix, EmbeddingRole};
 use crate::embedding::local::state::{assess_installation, LocalEmbeddingState};
 use crate::embedding::local::thread_budget::embedding_thread_budget;
 use crate::error::AppError;
+use crate::local_ai::paths::resolve_ai_paths;
 
 /// Explicit inference batch size (never fastembed's default 256 - a 300M
 /// model at ~700-token inputs would spike memory).

@@ -1,4 +1,5 @@
 //! Area test binary: commands
+mod bango_ai_test;
 mod chunk_rebuild_test;
 mod citation_finder_guard_test;
 mod criteria_generation_test;

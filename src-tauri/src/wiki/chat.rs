@@ -8,7 +8,6 @@ use tauri::State;
 
 use crate::commands::chat::ChatMessage;
 use crate::db::connection::DbState;
-use crate::db::llm_config_repo;
 use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::wiki::fts;
@@ -48,7 +47,7 @@ pub async fn wiki_chat(
     // 4. Load the LLM config.
     let config = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        llm_config_repo::get_config(&conn)?.ok_or_else(|| {
+        crate::llm::effective_config::resolve(&conn)?.ok_or_else(|| {
             AppError::Validation(
                 "LLM not configured. Please set up LLM configuration first.".to_string(),
             )

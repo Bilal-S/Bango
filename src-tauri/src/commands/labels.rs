@@ -9,7 +9,6 @@ use crate::db::audit_repo;
 use crate::db::connection::{lock_conn, DbState};
 use crate::db::criteria_repo;
 use crate::db::label_repo;
-use crate::db::llm_config_repo;
 use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::models::label::Label;
@@ -147,7 +146,7 @@ pub async fn suggest_labels(
 ) -> Result<SuggestLabelsResult, AppError> {
     let (config, research_aims, inclusion_criteria, exclusion_criteria) = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        let config = llm_config_repo::get_config(&conn)?
+        let config = crate::llm::effective_config::resolve(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
         let aims = criteria_repo::get_all_aims(&conn)?;
         let inc = criteria_repo::get_criteria_by_type(&conn, "inclusion")?;

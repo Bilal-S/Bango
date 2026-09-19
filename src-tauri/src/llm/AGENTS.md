@@ -14,7 +14,16 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
   `orchestrator.rs` (concurrency semaphore + rate limiting + `LlmRequestType`
   categorization + `send_embedding` + `send_batch_parallel` + `send_embedding_batch_parallel`),
   `embedding.rs` (per-provider embedding HTTP client + capability probe + per-provider limits),
-  `mod.rs`.
+  `backend.rs` (the `LlmBackend` domain type - leaf module), `local/` (Bango AI
+  profile/policy/hardware/pinned-manifest/install/engine manager: spawn +
+  health are trait seams, single-flight startup, per-start API key, native
+  `--sleep-idle-seconds` idle, in-flight accounting; start attempts are
+  budgeted separately from the crash budget, `Failed` is sticky until an
+  explicit stop/reset, stops are generation-guarded, and the reserved loopback
+  port is held by a listener until the spawn hands it over),
+  `effective_config.rs` (backend-aware config resolver used by every
+  generation call site for prompt budgeting), `readiness.rs`
+  (`has_usable_llm` + the path-aware `embedding_generation_ready`), `mod.rs`.
 - Consumed by every feature that makes LLM calls: screening, summaries, tags,
   labels, criteria, chat, wiki ingest/chat, translation, gap analysis, search
   strategy, OpenAlex smart search, figure descriptions, and embedding generation
@@ -276,6 +285,68 @@ OpenAI-compatible). Routing an OpenAI-shaped body to
   panic/empty + `send_embedding_batch_parallel` mockito dispatch + per-provider
   limits table), `tests/embedding/embedding_probe_persist_test.rs` (4: dimension-forwarding
   regression).
+
+### Bango AI backend selection (`backend.rs` + `local/`)
+
+- `LlmBackend` (`configured_provider` default | `bango_ai`) mirrors the
+  embedding backend enum: strict `parse_exact` for command arguments,
+  forgiving `parse` for DB reads. Persistence lives in
+  `db::app_settings_repo::LLM_BACKEND_KEY` (project-portable; readiness stays
+  machine-evaluated).
+- `local/profile.rs` pins the profile identity
+  (`builtin/ornith-1.5-9b-q4km@r1`), the model file name, the runtime
+  directory (`llama.cpp`), the engine label, and the platform server binary
+  name.
+- `local/policy.rs` owns the RAM-aware context default (16k below 24 GB, 32k
+  at or above), context clamping to 8k/16k/32k, and the generation thread
+  budget (`cores - 2`, floor 1, ceiling 8).
+- `local/hardware.rs` owns `HardwareProfile` / `HardwareVerdict` / `assess`
+  (unsupported = target or disk; warning = RAM floors or missing AVX2) plus
+  the `sysinfo`-backed `detect()`.
+- `local/manifest.rs` pins Ornith-1.5-9B Q4_K_M (MIT, commit-pinned) and the
+  llama.cpp `b10964` runtime archives with member/alias sets enumerated from
+  the real archives during the T4 spike; shared scheme/hash/disk-math
+  primitives come from `local_ai`.
+- `local/install.rs` owns the runtime/model assessment, full verification,
+  the runtime-first bundle install (idempotent, shared downloader + promote),
+  the model-profile install, and combined removal (locked Windows trees are
+  renamed aside and swept later).
+- `local/engine.rs` owns the managed `Arc<BangoAiEngine>`: a loopback port
+  reserved at construction so callers get a complete config before start, lazy
+  start with a per-start random `--api-key`, `/health` polling, one crash
+  restart per failure streak, `stop`/`reset_off_thread` (bounded in-flight
+  drain), `kill_blocking` for exit/`Drop`, and busy accounting. `ServerSpec`,
+  `ServerSpawner`, `ServerProcess`, and `HealthProbe` are trait seams so
+  lifecycle tests run without a real binary; the child's stdout/stderr append
+  to the engine log (`--log-file` is broken in b10964). Lock rule: the inner
+  mutex is NOT reentrant - guard holders must build configs with the private
+  `config_from`, never `effective_config` (the T5c self-deadlock fix).
+- `effective_config.rs` (T6) is the resolver: `resolve` / `resolve_no_decrypt`
+  return the stored cloud row under `configured_provider` or a complete local
+  config (reserved port + recommended machine settings, temperature 0.6,
+  concurrency 1, delay 0) under `bango_ai`; `effective_context_window` +
+  `is_local_backend` (both in `effective_config.rs`) are the kept helper
+  surface for window/budget consumers and the routing tests (aifixes1 D2
+  decision: kept, not deleted).
+- `readiness.rs` (T6) owns `has_usable_llm` (cloud row, or installed Bango AI
+  components) and `embedding_generation_ready` (path-aware: the cloud
+  embedding branch still needs a cloud row even when Bango AI serves
+  generation).
+- `LlmProvider::BangoAi` is runtime-only: `save_config` rejects it and
+  `parse_provider` never produces it, so the `llm_config` CHECK constraint is
+  untouched.
+- Orchestrator local routing (T6): `set_backend`/`set_backend_initial` +
+  `set_local_config_provider` (engine-backed `EngineLocalConfigProvider`);
+  `send_with_meta_opts` substitutes the live local config, applies
+  `resolve_timeout` (single 1800 s local override), skips the cloud
+  temperature latch/persistence, and builds `client::RequestOptions` via
+  `local_request_options` (structured calls force `enable_thinking=false`;
+  prose honors the toggle). `send_opts(json_mode)` is the JSON-intent seam
+  (`send_json` and the screening `HttpLlmClient` use it); cloud transports
+  never receive `response_format`/`chat_template_kwargs`.
+- The engine (`local/engine.rs`, T5) and the effective-config resolver
+  (`effective_config.rs`, T6) consume these modules; `has_usable_llm` becomes
+  the backend-aware generation gate in T6.
 
 ### `send_json` + JSON pre-parser (`orchestrator.rs` + `utils/json_repair.rs`)
 
