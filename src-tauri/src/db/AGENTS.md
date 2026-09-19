@@ -152,6 +152,8 @@ re-exports) + 10 submodules (`screening_queries`, `insert`, `query`,
 `mutations`, `metadata`, `bulk_ops`, `full_text`, `translation`, `doi_journal`,
 `delete`). Public API unchanged: `crate::db::article_repo::*` import paths
 resolve identically via the `mod.rs` re-exports.
+`query.rs` also owns `get_articles_by_statuses(conn, &[&str])` (IN-clause
+status whitelist) used by the embedding director for comma-joined scopes.
 
 #### `ArticleQuery` contract
 

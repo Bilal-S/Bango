@@ -151,7 +151,11 @@ rebuild). New contract:
 ### Embedding generation + probe commands (`embedding.rs`)
 
 `generate_embeddings` / `regenerate_embeddings` build the backend-aware
-sender via `runner::backend_sender`. `probe_embeddings` (Test Connection
+sender via `runner::backend_sender`. `regenerate_embeddings` rebuilds ONLY the
+checked statuses (comma-joined `status_filter`; `None`/blank = `included`,
+via `regenerate_scope_statuses`), and the same normalized list feeds both the
+scoped delete and the re-embed scope (delete-scope == embed-scope).
+`probe_embeddings` (Test Connection
 path) is backend-aware through the same sender: cloud probes over HTTP,
 `bango_local` runs the offline probe. `get_embedding_status` /
 `get_embedding_model_mismatch` are read-only.

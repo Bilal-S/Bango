@@ -39,6 +39,15 @@ foundations (`local/`), plus the storage layer in `db/embedding_repo.rs` (see
 
 ## Local Contracts
 
+### Director work-list scope (`director.rs::compute_work_list`)
+
+`EmbeddingScope.status_filter` is a comma-joined status whitelist (e.g.
+`"working,included"`); every listed status produces work and a blank/`None`
+filter falls back to `included`. Multi-status scopes resolve through
+`article_repo::get_articles_by_statuses` (IN clause). Binding the joined
+string as a single status silently yields zero targets (the multi-status
+Phase B bug: Citation Finder runs with two or more statuses embedded nothing).
+
 ### Backend router (`service.rs`) + local foundations (`local/`)
 
 Two embedding backends, selected by the machine-local `embedding_backend`
@@ -260,7 +269,8 @@ backend-aware sender via `runner::backend_sender(app_handle)`.
 - `tests/embedding/embedding_storage_test.rs` (11)
 - `tests/embedding/embedding_text_test.rs` (5)
 - `tests/embedding/embedding_provider_test.rs` (22)
-- `tests/embedding/embedding_director_test.rs` (11)
+- `tests/embedding/embedding_director_test.rs` (12, incl. the comma-joined
+  multi-status scope test: every listed status produces work)
 - `tests/embedding/embedding_backend_setting_test.rs` (5: default, round-trip,
   garbage-fallback, backup exclusion)
 - `tests/embedding/embedding_service_test.rs` (5: cloud query + documents via
@@ -320,7 +330,7 @@ backend-aware sender via `runner::backend_sender(app_handle)`.
   `download.rs` (2), `engine.rs` (4: vector validation
   accept/reject, dylib env-override + install-integrity resolution))
 
-208 tests total (205 excluding the three `#[ignore = "slow"]` live tests; the
+209 tests total (206 excluding the three `#[ignore = "slow"]` live tests; the
 PDF chunk fixture generator is also `#[ignore]`d, so it runs only on demand).
 
 ## Child DOX Index

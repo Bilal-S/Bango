@@ -18,7 +18,10 @@ independently; results grouped by claim).
 One-button flow: `find_citations` is the single entry point. It runs Phase A
 (readiness) → Phase B (auto-prepare embeddings if coverage <100%, reusing
 `generate_embeddings_inner`) → Phase C (the search pipeline), all under one
-`Arc<AtomicBool>` cancel token. Phase B is best-effort: after it runs, the
+`Arc<AtomicBool>` cancel token. Phase B passes the comma-joined status
+whitelist as `EmbeddingScope.status_filter`; every listed status produces work
+(director contract, `embedding/director.rs`). Phase B is best-effort: after it
+runs, the
 search proceeds regardless of the post-prepare coverage (there is NO 100%
 gate). Coverage can legitimately plateau below 100% when some articles have
 no embeddable content (empty title + empty abstract + no full-text chunks →
@@ -305,8 +308,9 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   `find_citations` wraps the pipeline in `FutureExt::catch_unwind`: a panic
   becomes a terminal `citation:error` and always clears `is_running` (the
   pre-fix task could die silently and wedge every later Find behind the
-  `is_running` guard). `[citation] stage=<name> start/end elapsed_ms` stderr
-  logs trace the pipeline for the next live diagnosis.
+  `is_running` guard). `[citation] stage=<name> ...` stderr logs trace the
+  pipeline for the next live diagnosis (`classifying` and `parse` also log
+  `end elapsed_ms`).
 - **Per-article lock discipline**: `build_claim_work` and `load_metadata` are
   `async` and each takes a brief `lock_conn` burst per article (releasing
   between articles, with `tokio::task::yield_now()`), so the `DbState` mutex

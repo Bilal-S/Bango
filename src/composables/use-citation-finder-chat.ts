@@ -204,8 +204,8 @@ export function useCitationFinderChat(args: {
   }
 
   /**
-   * Confirm the mismatch dialog: regenerate all embeddings in the active
-   * status scope while streaming live progress into the dialog. The held
+   * Confirm the mismatch dialog: regenerate the checked statuses (empty =
+   * `included`) while streaming live progress into the dialog. The held
    * prose is NOT auto-submitted (the regeneration is async); it is restored
    * to the textarea for a one-click re-submit.
    */

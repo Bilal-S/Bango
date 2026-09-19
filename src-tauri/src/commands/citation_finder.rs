@@ -204,8 +204,13 @@ pub async fn find_citations(
     Ok(guard.clone())
 }
 
-/// Cancel a running citation search. The token is checked between pipeline
-/// stages; an in-flight LLM/embedding request completes naturally.
+/// Cancel a running citation search. Phase C awaits (recall, claim split,
+/// classify) run through `await_cancellable`, which polls this token every
+/// 150ms and drops the in-flight future (aborting the request); a
+/// classification that completed after the click is discarded by the
+/// post-call check. Phase B's embedding runner checks the token between
+/// completed articles, so an in-flight embedding batch still finishes
+/// naturally.
 #[tauri::command]
 pub async fn cancel_citation_search(
     cf_state: State<'_, CitationFinderState>,

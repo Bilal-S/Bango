@@ -220,48 +220,60 @@ pub fn get_embedding_model_mismatch(
     }))
 }
 
-/// Regenerate ALL embeddings from scratch. Deletes every row in
-/// `article_embeddings` then re-runs `generate_embeddings_inner`. Used by the
-/// Citation Finder's model-mismatch dialog and standalone Settings.
+/// Effective status scope for [`regenerate_embeddings`]: the checked statuses,
+/// or `["included"]` when none are checked. The same normalized list feeds the
+/// delete and the re-embed scope, so a regenerate never wipes more than it
+/// rebuilds.
+#[must_use]
+pub fn regenerate_scope_statuses(status_filter: Option<&str>) -> Vec<String> {
+    let parsed: Vec<String> = status_filter
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    if parsed.is_empty() {
+        vec!["included".to_string()]
+    } else {
+        parsed
+    }
+}
+
+/// Regenerate the checked statuses from scratch. Deletes the scoped rows in
+/// `article_embeddings` then re-runs `generate_embeddings_inner` over the same
+/// scope. Used by the Citation Finder's model-mismatch dialog and standalone
+/// Settings.
 ///
 /// Delete-then-regenerate is clearer than `force=true` (no orphan rows when
-/// chunk counts shrink). `status_filter` scopes both delete + regenerate;
-/// empty = all statuses. Returns immediately; real result via events.
+/// chunk counts shrink). `status_filter` scopes BOTH delete + regenerate;
+/// `None`/blank = `included`. Returns immediately; real result via events.
 #[tauri::command]
 pub async fn regenerate_embeddings(
     _db_state: State<'_, DbState>,
     app_handle: tauri::AppHandle,
     status_filter: Option<String>,
 ) -> Result<EmbeddingRunReport, AppError> {
+    let statuses = regenerate_scope_statuses(status_filter.as_deref());
     /* Phase 1: scoped delete (brief lock). Must run BEFORE the runner re-derives
-     * its work list so the director sees an empty table. Scoped to the same
-     * status filter the runner uses, so a Citation-Finder regenerate doesn't
-     * wipe rows generated for other statuses. */
+     * its work list so the director sees an empty table. Scoped to the SAME
+     * normalized status list the runner uses, so a Citation-Finder regenerate
+     * never wipes rows outside the checked statuses. */
     {
         let db = app_handle.state::<DbState>();
         let conn = lock_conn(&db.conn)?;
-        if let Some(ref filter) = status_filter {
-            /* Build `status IN (?, ?, ?)` from comma-joined filter (matches
-             * `EmbeddingScope.status_filter`'s single-string contract). All
-             * statuses are bound as params - no SQL injection. */
-            let statuses: Vec<&str> =
-                filter.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
-            if statuses.is_empty() {
-                crate::db::embedding_repo::delete_all_embeddings(&conn)?;
-            } else {
-                let placeholders: Vec<&str> = (0..statuses.len()).map(|_| "?").collect();
-                let in_clause = placeholders.join(", ");
-                let sql = format!(
-                    "DELETE FROM article_embeddings \
-                     WHERE article_id IN (SELECT id FROM articles WHERE status IN ({in_clause}))"
-                );
-                let pairs: Vec<&dyn rusqlite::ToSql> =
-                    statuses.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
-                conn.execute(&sql, rusqlite::params_from_iter(pairs.iter()))?;
-            }
-        } else {
-            crate::db::embedding_repo::delete_all_embeddings(&conn)?;
-        }
+        /* Build `status IN (?, ?, ?)` from the normalized filter (matches
+         * `EmbeddingScope.status_filter`'s comma-string contract). All
+         * statuses are bound as params - no SQL injection. */
+        let placeholders: Vec<&str> = (0..statuses.len()).map(|_| "?").collect();
+        let in_clause = placeholders.join(", ");
+        let sql = format!(
+            "DELETE FROM article_embeddings \
+             WHERE article_id IN (SELECT id FROM articles WHERE status IN ({in_clause}))"
+        );
+        let pairs: Vec<&dyn rusqlite::ToSql> =
+            statuses.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+        conn.execute(&sql, rusqlite::params_from_iter(pairs.iter()))?;
     }
 
     // Phase 2: re-embed (background task; emits `embedding:progress`/`done`).
@@ -270,7 +282,8 @@ pub async fn regenerate_embeddings(
     /* `force=false` is correct: the delete above emptied relevant rows, so the
      * director's hash-comparison naturally produces full work. (force=true
      * would work but bypass the model-mismatch signal in the report.) */
-    let scope = EmbeddingScope { article_ids: None, status_filter, force: false };
+    let scope =
+        EmbeddingScope { article_ids: None, status_filter: Some(statuses.join(",")), force: false };
     let handle = app_handle.clone();
     tokio::task::spawn(async move {
         let st = handle.state::<DbState>();

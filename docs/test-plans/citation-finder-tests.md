@@ -112,6 +112,7 @@ private internals (`merge_outputs`, `pool_finalists`, `ClaimWork`, `Finalists`)
 | `src-tauri/tests/embedding/embedding_recall_multistatus_test.rs::pool_hits_orders_by_score_desc_then_id` | deterministic score-desc + id-asc ordering |
 | `src-tauri/tests/embedding/embedding_director_test.rs::director_detects_model_mismatch_as_stale` | stored model differs from current → row marked stale (pins the silent zero-results fix) |
 | `src-tauri/tests/embedding/embedding_director_test.rs::director_skips_fresh_rows_when_hash_matches` | hash + model both match → row skipped (AllFresh) |
+| `src-tauri/tests/embedding/embedding_director_test.rs::director_multi_status_filter_targets_every_listed_status` | A comma-joined status scope (Citation Finder checkboxes) produces work for every listed status (pre-fix the whole string was bound as one status → zero targets) |
 | `src-tauri/tests/embedding/embedding_model_mismatch_test.rs::no_mismatch_when_stored_matches_current` | stored == current → None |
 | `src-tauri/tests/embedding/embedding_model_mismatch_test.rs::no_mismatch_when_nothing_stored` | empty stored → None |
 | `src-tauri/tests/embedding/embedding_model_mismatch_test.rs::mismatch_when_stored_differs_from_current` | stored != current → Some(stored) |
@@ -123,6 +124,8 @@ private internals (`merge_outputs`, `pool_finalists`, `ClaimWork`, `Finalists`)
 | `src-tauri/tests/embedding/embedding_model_mismatch_test.rs::list_distinct_model_names_empty_when_table_empty` | empty table → empty vec |
 | `src-tauri/tests/embedding/embedding_model_mismatch_test.rs::list_distinct_model_names_omits_null_and_empty` | NULL/empty model_name filtered out |
 | `src-tauri/tests/embedding/embedding_model_mismatch_test.rs::delete_all_embeddings_clears_every_row` | DELETE FROM article_embeddings wipes all rows |
+| `src-tauri/tests/commands/embedding_regenerate_scope_test.rs::regenerate_scope_defaults_to_included_when_empty` | `None`/blank/whitespace-only regenerate scopes normalize to `included` |
+| `src-tauri/tests/commands/embedding_regenerate_scope_test.rs::regenerate_scope_keeps_only_the_checked_statuses` | Only the checked statuses survive normalization (trimmed, order preserved) |
 | `src-tauri/tests/citation_finder/citation_finder_pipeline_test.rs::cancel_during_hanging_classification_returns_cancelled` | Cancel interrupts a pending classify promptly (select! poll) with `Cancelled` |
 | `src-tauri/tests/citation_finder/citation_finder_pipeline_test.rs::cancel_during_hanging_recall_returns_cancelled` | Cancel interrupts a pending recall promptly with `Cancelled` |
 | `src-tauri/tests/citation_finder/citation_finder_pipeline_test.rs::cancel_after_completed_classification_returns_cancelled` | A classification that returned after the Cancel click is discarded (no done-with-results) |
@@ -138,7 +141,7 @@ private internals (`merge_outputs`, `pool_finalists`, `ClaimWork`, `Finalists`)
 | `src/__tests__/composables/use-citation-finder.test.ts::getModelMismatch_dispatches_command_and_returns_payload` | mismatch IPC wiring + payload shape |
 | `src/__tests__/composables/use-citation-finder.test.ts::getModelMismatch_returns_null_when_no_mismatch` | null passthrough when no mismatch |
 | `src/__tests__/composables/use-citation-finder.test.ts::regenerateEmbeddings_dispatches_scoped_command` | scoped regenerate IPC wiring |
-| `src/__tests__/composables/use-citation-finder.test.ts::regenerateEmbeddings_passes_null_for_all_statuses` | null filter = all statuses |
+| `src/__tests__/composables/use-citation-finder.test.ts::regenerateEmbeddings_passes_null_through` | null filter forwards `null` (backend defaults to `included`) |
 | `src/__tests__/components/citation-result-card.test.ts::renders_metadata_passage_badge_confidence` | card layout contract: author + year + title rendered; journal/DOI hidden |
 | `src/__tests__/components/citation-result-card.test.ts::sectionOrigin_null_omits_badge` | null section → no § badge |
 | `src/__tests__/components/citation-result-card.test.ts::truncates_long_title_at_word_boundary_with_tooltip` | >65-char title → word-boundary prefix + `...` on-card, full title in the `title` attribute |

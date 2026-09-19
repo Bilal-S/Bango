@@ -162,8 +162,9 @@ export async function getModelMismatch(): Promise<EmbeddingModelMismatch | null>
 }
 
 /**
- * Regenerate ALL embeddings in the given status scope. Deletes existing rows
- * then re-runs. Used by the model-mismatch confirmation dialog.
+ * Regenerate the checked statuses in the given scope. Deletes only those rows
+ * then re-runs. `null`/empty = `included` (backend default). Used by the
+ * model-mismatch confirmation dialog.
  */
 export async function regenerateEmbeddings(statusFilter: string | null): Promise<void> {
   await tauriCommand<unknown>('regenerate_embeddings', { statusFilter });
@@ -174,7 +175,7 @@ export async function regenerateEmbeddings(statusFilter: string | null): Promise
  * Subscribes to `embedding:progress` for the duration of the command (which
  * resolves after the run completes) and always releases the listener.
  *
- * @param statusFilter Comma-joined status scope; `null` = all statuses.
+ * @param statusFilter Comma-joined status scope; `null`/empty = `included`.
  * @param onProgress Live progress sink (Phase B-shaped payloads).
  */
 export async function regenerateEmbeddingsWithProgress(

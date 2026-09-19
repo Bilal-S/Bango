@@ -231,6 +231,34 @@ fn director_status_filter_defaults_to_included() {
 }
 
 #[test]
+fn director_multi_status_filter_targets_every_listed_status() {
+    let conn = create_connection().unwrap();
+    run_migrations(&conn).unwrap();
+    seed_config(&conn);
+    set_enabled(&conn);
+    seed_article(&conn, "inc", "included", "T1", "A1");
+    seed_article(&conn, "wk", "working", "T2", "A2");
+    seed_article(&conn, "rej", "rejected", "T3", "A3");
+
+    // The Citation Finder joins its status checkboxes into a comma-separated
+    // scope; every listed status must produce work. Pre-fix the whole string
+    // was bound as ONE status (`WHERE status = 'working,rejected'`) -> zero
+    // targets, so multi-status Phase B silently embedded nothing.
+    let list = compute_work_list(
+        &conn,
+        &EmbeddingScope {
+            status_filter: Some("working,rejected".to_string()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut ids: Vec<&str> = list.rows.iter().map(|r| r.article_id.as_str()).collect();
+    ids.sort();
+    assert_eq!(ids, vec!["rej", "wk"]);
+    assert_eq!(list.total_articles, 2);
+}
+
+#[test]
 fn director_explicit_article_ids_override_status_filter() {
     let conn = create_connection().unwrap();
     run_migrations(&conn).unwrap();

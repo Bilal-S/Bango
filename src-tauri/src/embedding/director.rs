@@ -20,7 +20,9 @@ use crate::error::AppError;
 pub struct EmbeddingScope {
     /// Explicit IDs (non-empty → overrides `status_filter`).
     pub article_ids: Option<Vec<String>>,
-    /// Status filter (default: `"included"`). Ignored when `article_ids` is set.
+    /// Status whitelist, comma-joined (e.g. `"working,included"`); every
+    /// listed status produces work. `None`/blank falls back to `"included"`.
+    /// Ignored when `article_ids` is set.
     pub status_filter: Option<String>,
     /// Force re-embed all rows regardless of stored hash.
     pub force: bool,
@@ -115,8 +117,20 @@ pub fn compute_work_list(conn: &Connection, scope: &EmbeddingScope) -> Result<Wo
     let target_ids: Vec<String> = match &scope.article_ids {
         Some(ids) if !ids.is_empty() => ids.clone(),
         _ => {
-            let filter = scope.status_filter.as_deref().unwrap_or("included");
-            article_repo::get_articles_by_status(conn, filter)?.into_iter().map(|a| a.id).collect()
+            /* `status_filter` is a comma-joined whitelist (the Citation
+            Finder's checkbox scope); every listed status produces work.
+            Blank falls back to "included". */
+            let raw = scope.status_filter.as_deref().unwrap_or("included");
+            let statuses: Vec<&str> =
+                raw.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+            let articles = if statuses.is_empty() {
+                article_repo::get_articles_by_status(conn, "included")?
+            } else if statuses.len() == 1 {
+                article_repo::get_articles_by_status(conn, statuses[0])?
+            } else {
+                article_repo::get_articles_by_statuses(conn, &statuses)?
+            };
+            articles.into_iter().map(|a| a.id).collect()
         }
     };
 

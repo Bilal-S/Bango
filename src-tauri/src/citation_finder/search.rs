@@ -453,8 +453,11 @@ async fn run_whole_block(
     }
     /* Lenient parse: snake_case + camelCase, object-wrapped arrays, per-element
     fault isolation (one bad entry doesn't drop the whole batch). */
+    eprintln!("[citation] stage=parse start");
+    let parse_started = Instant::now();
     let llm_outputs = parse_citation_outputs(&json)
         .map_err(|e| AppError::Import(format!("Citation Finder LLM returned invalid JSON: {e}")))?;
+    eprintln!("[citation] stage=parse end elapsed_ms={}", parse_started.elapsed().as_millis());
 
     let matches = merge_outputs(&llm_outputs, &finalists, &metadata, None);
     emit_funnel_progress(emit_progress, funnel_from(&finalists, &llm_outputs, matches.len()));
@@ -549,8 +552,11 @@ async fn run_per_statement(
     }
     /* Lenient parse: snake_case + camelCase, object-wrapped arrays, per-element
     fault isolation (one bad entry doesn't drop the whole batch). */
+    eprintln!("[citation] stage=parse start");
+    let parse_started = Instant::now();
     let llm_outputs = parse_citation_outputs(&json)
         .map_err(|e| AppError::Import(format!("Citation Finder LLM returned invalid JSON: {e}")))?;
+    eprintln!("[citation] stage=parse end elapsed_ms={}", parse_started.elapsed().as_millis());
 
     // Group LLM outputs by claim.
     let mut results: Vec<CitationResult> = Vec::with_capacity(claims.len());

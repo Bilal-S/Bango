@@ -85,6 +85,25 @@ pub fn get_articles_by_ids(conn: &Connection, ids: &[String]) -> Result<Vec<Arti
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+/// Fetch articles for a status whitelist (the Citation Finder's comma-joined
+/// scope arrives here as a slice). Empty slice returns an empty vec.
+pub fn get_articles_by_statuses(
+    conn: &Connection,
+    statuses: &[&str],
+) -> Result<Vec<Article>, AppError> {
+    if statuses.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = (0..statuses.len()).map(|_| "?").collect::<Vec<_>>().join(", ");
+    let sql =
+        format!("{ARTICLE_SELECT_BASE} WHERE status IN ({placeholders}) ORDER BY imported_at DESC");
+    let params: Vec<&dyn rusqlite::types::ToSql> =
+        statuses.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params.as_slice(), row_to_article)?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
 pub fn get_duplicate_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
     let sql = format!(
         "{ARTICLE_SELECT_BASE} WHERE status = 'duplicate' AND duplicate_of IS NULL ORDER BY imported_at DESC"

@@ -212,7 +212,7 @@ describe('use-citation-finder (pure helpers)', () => {
       });
     });
 
-    it('regenerateEmbeddings_passes_null_for_all_statuses', async () => {
+    it('regenerateEmbeddings_passes_null_through', async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (tauriCommand as any).mockResolvedValue(undefined);
       await regenerateEmbeddings(null);
