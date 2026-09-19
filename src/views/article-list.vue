@@ -13,6 +13,7 @@ import {
 } from '@/composables/use-ai-summary';
 import { useFeatureFlags } from '@/composables/use-feature-flags';
 import { useBatchReferenceScraping } from '@/composables/use-references';
+import { REFERENCES_HALO_MIN_USES, useReferencesHalo } from '@/composables/use-references-halo';
 import { useChatStore } from '@/stores/chat';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { useArticleDelete } from '@/composables/use-article-delete';
@@ -130,6 +131,12 @@ const { screenArticle } = useScreening();
  * the LLM config changes in Settings. */
 const llmReady = useLlmConfigured();
 
+/* References-tab halo: light yellow glow on the tab while at least one
+ * high-use unmatched reference paper (REFERENCES_HALO_MIN_USES total uses)
+ * awaits review. Refreshed on mount/activation and after every reference
+ * mutation handled by this view (imports, promotions, batch scrape). */
+const { hasHighUseReferences, refresh: refreshReferencesHalo } = useReferencesHalo();
+
 const activeReferencePaperId = ref<string | null>(null);
 
 function handleNavigateToArticleWithRef(articleId: string, paperId?: string): void {
@@ -168,6 +175,7 @@ function applyDeepLinkParams(params: ArticleRouteDeepLinkParams): boolean {
 }
 
 onMounted(() => {
+  void refreshReferencesHalo();
   const params = parseArticleRouteQuery(route.query);
   const applied = applyDeepLinkParams(params);
   if (!applied) {
@@ -193,6 +201,10 @@ onActivated(() => {
     isFirstActivation = false;
     return;
   }
+
+  /* References may have changed while away (imports, deletions) - the halo
+   * flag is view-level state, so it needs its own refresh. */
+  void refreshReferencesHalo();
 
   const params = parseArticleRouteQuery(route.query);
   const articleIdDiffers = !!params.articleId && selectedArticle.value?.id !== params.articleId;
@@ -276,9 +288,9 @@ function handleCloseDetail(): void {
   localStorage.setItem('bango-detail-fullscreen', 'false');
 }
 
-/** Refresh status tab counts when references are updated */
+/** Refresh status tab counts + References-tab halo when references are updated */
 async function handleReferencesUpdated(): Promise<void> {
-  await fetchCounts();
+  await Promise.all([fetchCounts(), refreshReferencesHalo()]);
 }
 
 // Inline decision notification state
@@ -304,7 +316,7 @@ const STATUS_TAB_TIPS: Record<string, string> = {
   rejected: 'Articles excluded from research',
   error: 'Articles with errors:check audit trail',
   duplicate: 'Duplicate articles',
-  references: 'Browse all reference & citation papers',
+  references: `Browse all reference & citation papers - highlighted when high-use unmatched references (${REFERENCES_HALO_MIN_USES}+ uses) await review`,
   search: 'Search the OpenAlex catalog',
 };
 
@@ -329,6 +341,8 @@ async function handleMoveArticle(id: string, newStatus: string): Promise<void> {
 /** When a reference is promoted to an article, refresh the list and navigate to it */
 async function handleArticlePromoted(articleId: string): Promise<void> {
   await search();
+  // Promotion flips the paper out of the unmatched set - re-evaluate the halo.
+  void refreshReferencesHalo();
   selectArticle(articleId);
 }
 
@@ -338,7 +352,8 @@ async function handleArticlePromoted(articleId: string): Promise<void> {
  * article detail panel - the card animates out within the References view.
  */
 async function handleArticleAdded(): Promise<void> {
-  await fetchCounts();
+  // Quick-add also promotes the paper (match status flips) - refresh the halo.
+  await Promise.all([fetchCounts(), refreshReferencesHalo()]);
 }
 
 function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
@@ -664,11 +679,12 @@ useArticleListKeyboard({
           :key="tab"
           :title="STATUS_TAB_TIPS[tab]"
           class="pb-3 text-sm font-medium transition-colors relative cursor-default"
-          :class="
+          :class="[
             activeStatusTab === tab
               ? 'text-indigo-600 font-bold'
-              : 'text-slate-500 hover:text-slate-900'
-          "
+              : 'text-slate-500 hover:text-slate-900',
+            tab === 'references' && hasHighUseReferences ? 'references-tab-halo' : '',
+          ]"
           @click="setStatusTab(tab)"
         >
           <span>{{ STATUS_TAB_LABELS[tab] }}</span>
@@ -964,6 +980,18 @@ useArticleListKeyboard({
 </template>
 
 <style scoped>
+/* Light yellow halo on the References tab: shown while at least one high-use
+ * unmatched reference paper (REFERENCES_HALO_MIN_USES total uses) awaits
+ * review. Amber palette matches the Articles-of-Interest cards in
+ * references-view.vue; box-shadow only, so toggling never shifts layout. */
+.references-tab-halo {
+  border-radius: 0.375rem;
+  background-color: rgb(254 249 195 / 0.55);
+  box-shadow:
+    0 0 0 3px rgb(253 230 138 / 0.4),
+    0 0 12px 2px rgb(253 224 71 / 0.35);
+}
+
 .status-tabs {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;

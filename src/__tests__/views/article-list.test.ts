@@ -47,14 +47,14 @@ function createSearchMocks() {
     allTags: ref<string[]>([]),
     allLabels: ref<string[]>([]),
     STATUS_TABS: [
+      'search',
       'all',
-      'duplicate',
       'working',
       'included',
       'rejected',
-      'error',
       'references',
-      'search',
+      'error',
+      'duplicate',
     ],
     search: vi.fn(async () => {}),
     fetchCounts: vi.fn(async () => {}),
@@ -120,7 +120,15 @@ import { shimLocalStorage, makeArticle } from '../helpers/fixtures';
 
 let mocks = createSearchMocks();
 
+/* References-tab halo mock: the view wires useReferencesHalo(); tests flip
+ * hasHighUseReferences to drive the tab's halo class. */
+let haloMocks = { hasHighUseReferences: ref(false), refresh: vi.fn(async () => {}) };
+
 vi.mock('@/composables/use-article-search', () => ({ useArticleSearch: () => mocks }));
+vi.mock('@/composables/use-references-halo', () => ({
+  REFERENCES_HALO_MIN_USES: 4,
+  useReferencesHalo: () => haloMocks,
+}));
 vi.mock('@/composables/use-screening', () => ({
   useScreening: () => ({ screenArticle: vi.fn() }),
 }));
@@ -187,6 +195,7 @@ describe('article-list.vue', () => {
     routeState.query = {};
     mockPush.mockReset();
     mocks = createSearchMocks();
+    haloMocks = { hasHighUseReferences: ref(false), refresh: vi.fn(async () => {}) };
     vi.mocked(requestBulkArticleAiSummary).mockClear();
     mockExportRisForIds.mockReset();
     mockExportRisForIds.mockResolvedValue(true);
@@ -321,6 +330,39 @@ describe('article-list.vue', () => {
       new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
     );
     expect(mocks.navigateNext).toHaveBeenCalledTimes(2);
+  });
+
+  /* Tab order is the product-defined sequence: Search first, Duplicates last.
+   * The first span in each tab button is its label. */
+  it('status_tabs_render_in_defined_order', async () => {
+    wrapper = await mountView();
+    const labels = wrapper.findAll('.status-tabs button').map((b) => b.find('span').text());
+    expect(labels).toEqual([
+      'Search',
+      'All',
+      'Working',
+      'Included',
+      'Rejected',
+      'References',
+      'Errors',
+      'Duplicates',
+    ]);
+  });
+
+  it('references_tab_halo_follows_high_use_flag', async () => {
+    haloMocks.hasHighUseReferences.value = true;
+    wrapper = await mountView();
+    const tabButtons = wrapper.findAll('.status-tabs button');
+    const referencesBtn = tabButtons.find((b) => b.find('span').text() === 'References');
+    const allBtn = tabButtons.find((b) => b.find('span').text() === 'All');
+    expect(referencesBtn?.classes()).toContain('references-tab-halo');
+    /* The halo is References-only - no other tab carries it. */
+    expect(allBtn?.classes()).not.toContain('references-tab-halo');
+
+    /* Flipping the flag off removes the halo reactively. */
+    haloMocks.hasHighUseReferences.value = false;
+    await flushPromises();
+    expect(referencesBtn?.classes()).not.toContain('references-tab-halo');
   });
 
   /* Bulk AI Summary routes through handleBulkAiSummary: only selected articles

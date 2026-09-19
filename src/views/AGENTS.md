@@ -48,7 +48,11 @@ matcher to find `<script setup>` components).
   `?status=…&tags=…`, biblio/tag/label deep-links) override the preserved
   state when they differ (explicit navigation wins). The References and Search
   tabs skip `search()` (their child components own their data) but still
-  refresh tab badges.
+  refresh tab badges and the References-tab halo
+  (`use-references-halo.ts`: light yellow glow while an articles-of-interest
+  paper has 4+ total uses). Status tabs render in the fixed order Search, All,
+  Working, Included, Rejected, References, Errors, Duplicates
+  (`use-article-filters.ts` `STATUS_TABS`).
 - The other `useArticleSearch()` consumers (`wiki-view.vue`, `chat-view.vue`,
   `biblio-citations.vue`, `biblio-coauthors.vue`, `biblio-keywords.vue`) are
   NOT affected - they keep creating fresh per-view composable instances as

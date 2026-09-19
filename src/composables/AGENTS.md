@@ -55,6 +55,10 @@ views, LLM config, wiki, dashboard, saved reports, and the startup upgrade.
 - Also: `use-startup-upgrade.ts`, `use-bibliometrics.ts`,
   `use-journal-info.ts`, `use-network-view.ts`, `use-nav-history.ts`,
   `use-full-text-attachment.ts`, `use-article-delete.ts`,
+  `use-references-halo.ts` (References-tab halo: true when an
+  articles-of-interest paper reaches `REFERENCES_HALO_MIN_USES` total uses;
+  `article-list.vue` refreshes it on mount/activation and after every
+  reference mutation it handles),
   `use-gap-analysis.ts`, `use-wiki.ts`, `use-llm-config.ts`,
   `use-llm-configured.ts` (the canonical LLM gate, `src/AGENTS.md`),
   `use-embedding-settings.ts` (premium embedding-model override load/save;

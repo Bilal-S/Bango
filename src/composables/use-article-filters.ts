@@ -69,14 +69,14 @@ export interface ArticleQuery {
 export type SortDirection = 'asc' | 'desc';
 
 export const STATUS_TABS: readonly (ArticleStatus | 'all' | 'error' | 'references' | 'search')[] = [
+  'search',
   'all',
-  'duplicate',
   'working',
   'included',
   'rejected',
-  'error',
   'references',
-  'search',
+  'error',
+  'duplicate',
 ] as const;
 
 export type StatusTab = (typeof STATUS_TABS)[number];
