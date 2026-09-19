@@ -139,6 +139,20 @@ pub struct CitationFinderReadiness {
     /// `None` when probe has not run or provider is disabled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embedding_model: Option<String>,
+    /// Machine-local embedding backend selection
+    /// (`"configured_provider"` | `"bango_local"`). With `bango_local`, the
+    /// chat-provider static check is skipped (embeddings run on-device) and
+    /// the frontend uses `local_ready` for the contextual download prompt.
+    pub embedding_backend: String,
+    /// When `embedding_backend == "bango_local"`: whether the local
+    /// components are installed and healthy (model profile Ready + runtime
+    /// library at its pinned size). Always `false` for the cloud backend.
+    pub local_ready: bool,
+    /// Whether the CHAT provider (when configured) statically supports an
+    /// embedding API (findings-7: the contextual prompt's "Use Configured
+    /// Provider" option is a dead end for Anthropic/Z.AI users, so the
+    /// dialog hides/disables it with an explanation).
+    pub chat_provider_supports_embeddings: bool,
 }
 
 /// Progress emitted via `citation:progress` event and returned by

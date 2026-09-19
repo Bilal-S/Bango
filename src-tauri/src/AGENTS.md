@@ -141,8 +141,17 @@ described inline.
   + v8.x cancel/timeout/diagnostics contracts. See `screening/AGENTS.md`.
 - **`wiki/`** - LLM Wiki knowledge-base (parallel chunked ingest, 5-layer
   pre-seed, FTS5, drift detection, static-site export). See `wiki/AGENTS.md`.
-- **`embedding/`** - Semantic search (director, runner, recall, batching).
-  See `embedding/AGENTS.md`.
+- **`embedding/`** - Semantic search (director, runner, recall, batching) plus
+  the backend router (`service.rs`: Configured Provider vs Bango Local), the
+  local backend (`local/`: OneDrive-aware artifact paths, thread budget,
+  EmbeddingGemma prompt profile, profile identity, install state probes,
+  pinned component manifest + pinned ONNX Runtime, atomic
+  download/install/verify/remove with resume + rollback + runtime archive
+  extraction, and the local inference engine - a lazily-loaded fastembed
+  session executing on the blocking pool), and the component-manager
+  commands (`commands/local_embeddings.rs`, registered in `lib.rs`; the
+  shared engine is managed as `Arc<LocalEngine>`). See
+  `embedding/AGENTS.md`.
 - **`citation_finder/`** - Paste-prose-to-citations matching (three-layer
   pipeline: embedding prefilter with chunk provenance → containment passage
   evidence with cosine-chunk fallback + abstract context → LLM classify,

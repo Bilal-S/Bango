@@ -458,6 +458,36 @@ pub fn set_embedding_model_override(
     set_setting(conn, EMBEDDING_MODEL_OVERRIDE_KEY, trimmed)
 }
 
+// ── Embedding backend (Configured Provider / Bango Local) ────────────────────
+
+/// `app_settings` key selecting which backend generates embeddings.
+///
+/// `configured_provider` (default) follows the configured LLM provider's
+/// embedding API; `bango_local` runs on-device inference via the downloaded
+/// model + ONNX Runtime. The domain type lives in `embedding::backend` (the
+/// service router owns it); this repo owns only the key's persistence.
+/// Machine-local - excluded from `PROJECT_PORTABLE_SETTINGS` per the spec
+/// §8.1 `embedding_*` rule: the selection is tied to this machine's
+/// installed components.
+pub const EMBEDDING_BACKEND_KEY: &str = "embedding_backend";
+
+/// Read the embedding backend selection. Defaults to `ConfiguredProvider`.
+pub fn get_embedding_backend(
+    conn: &Connection,
+) -> Result<crate::embedding::backend::EmbeddingBackend, AppError> {
+    Ok(crate::embedding::backend::EmbeddingBackend::parse(
+        get_setting(conn, EMBEDDING_BACKEND_KEY)?.as_deref(),
+    ))
+}
+
+/// Persist the embedding backend selection.
+pub fn set_embedding_backend(
+    conn: &Connection,
+    backend: crate::embedding::backend::EmbeddingBackend,
+) -> Result<(), AppError> {
+    set_setting(conn, EMBEDDING_BACKEND_KEY, Some(backend.as_str()))
+}
+
 // ── Project name (editable dashboard title) ─────────────────────────────────
 
 /// `app_settings` key for the user-editable project name shown in the
@@ -490,7 +520,9 @@ pub fn set_project_name(conn: &Connection, value: &str) -> Result<(), AppError> 
 
 /// The subset of `app_settings` keys that travel with a project backup.
 /// Explicitly excluded: `storage_root`, `flag_premium`, `*_needs_refresh`,
-/// `wiki_dir_hash`, `fulltext_storage_dir` (legacy), `embedding_model_override`.
+/// `wiki_dir_hash`, `fulltext_storage_dir` (legacy), `embedding_model_override`,
+/// `embedding_backend` (machine-local: tied to this machine's installed
+/// local-embedding components).
 pub const PROJECT_PORTABLE_SETTINGS: &[&str] = &[
     SCREENING_CUSTOM_LOGIC_KEY,
     AUTO_TRANSLATE_KEY,

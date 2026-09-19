@@ -153,3 +153,103 @@ fn compute_readiness_anthropic_keeps_persisted_disabled() {
     assert_eq!(r.embedding_status, "disabled");
     assert!(!r.provider_supports_embeddings);
 }
+
+// ── T7: backend-aware readiness (`bango_local` skips the static check) ────
+//
+// With `bango_local` selected, embeddings run on-device: the chat provider's
+// (lack of an) embedding API is irrelevant. The static Anthropic/Z.AI
+// override must NOT fire, and the payload carries `local_ready` for the
+// frontend's contextual prompt.
+
+#[test]
+fn compute_readiness_bango_local_skips_anthropic_static_override() {
+    // THE T7 regression: an Anthropic chat provider + `bango_local` selected
+    // + unknown status must not be statically overridden to "disabled" (the
+    // old behavior hard-disabled Citation Finder even with a healthy local
+    // install). L6 (findings-7) additionally makes the Phase A gate
+    // authoritative on ACTUAL readiness: with the components missing,
+    // `provider_supports_embeddings` is false (the contextual prompt /
+    // backend-aware gate message handle it) even though the reported status
+    // stays "unknown".
+    let conn = create_connection().unwrap();
+    run_migrations(&conn).unwrap();
+    seed_provider(&conn, LlmProvider::Anthropic);
+    app_settings_repo::set_embedding_backend(
+        &conn,
+        bango_lib::embedding::backend::EmbeddingBackend::BangoLocal,
+    )
+    .unwrap();
+    let r = compute_readiness(&conn, &[]).unwrap();
+    assert_eq!(
+        r.embedding_status, "unknown",
+        "the chat-provider static override must not fire for bango_local"
+    );
+    assert!(
+        !r.provider_supports_embeddings,
+        "missing components block Phase A (authoritative local gate)"
+    );
+    assert_eq!(r.embedding_backend, "bango_local");
+    // Nothing installed under the (unset) storage root:
+    assert!(!r.local_ready, "local_ready false until components install");
+}
+
+#[test]
+fn compute_readiness_bango_local_ready_passes_gate_despite_stale_disabled() {
+    // L6+L7 (findings-7): healthy local components + a stale `disabled`
+    // triple (transient self-test failure) must pass the Phase A gate -
+    // readiness, not the persisted triple, is authoritative for the local
+    // backend (the frontend self-heal re-probes in parallel).
+    let conn = create_connection().unwrap();
+    run_migrations(&conn).unwrap();
+    seed_provider(&conn, LlmProvider::Anthropic);
+    app_settings_repo::set_embedding_backend(
+        &conn,
+        bango_lib::embedding::backend::EmbeddingBackend::BangoLocal,
+    )
+    .unwrap();
+    app_settings_repo::set_embedding_status(&conn, EmbeddingStatus::Disabled, "", 0).unwrap();
+    // No storage root set -> local_ready stays false here; the ready case is
+    // exercised by the engine/install suites. What this pins instead: the
+    // gate for bango_local follows local_ready, NOT the disabled triple -
+    // provider_supports must equal local_ready (false == false here, and the
+    // assertion documents the pairing rather than the old `status != Disabled`).
+    let r = compute_readiness(&conn, &[]).unwrap();
+    assert_eq!(r.embedding_status, "disabled");
+    assert_eq!(
+        r.provider_supports_embeddings, r.local_ready,
+        "the local gate tracks actual readiness, not the persisted triple"
+    );
+}
+
+#[test]
+fn compute_readiness_bango_local_reports_persisted_disabled() {
+    // A persisted "disabled" (the offline probe's outcome when the local
+    // components are missing) still reports disabled - the Phase A gate then
+    // blocks with the backend-aware install message, and the frontend's
+    // contextual prompt intercepts earlier.
+    let conn = create_connection().unwrap();
+    run_migrations(&conn).unwrap();
+    seed_provider(&conn, LlmProvider::Anthropic);
+    app_settings_repo::set_embedding_backend(
+        &conn,
+        bango_lib::embedding::backend::EmbeddingBackend::BangoLocal,
+    )
+    .unwrap();
+    app_settings_repo::set_embedding_status(&conn, EmbeddingStatus::Disabled, "", 0).unwrap();
+    let r = compute_readiness(&conn, &[]).unwrap();
+    assert_eq!(r.embedding_status, "disabled");
+    assert!(!r.provider_supports_embeddings);
+    assert!(!r.local_ready);
+}
+
+#[test]
+fn compute_readiness_cloud_backend_reports_defaults() {
+    // Cloud default: backend fields are the cloud identity, local_ready
+    // always false.
+    let conn = create_connection().unwrap();
+    run_migrations(&conn).unwrap();
+    seed_provider(&conn, LlmProvider::Openai);
+    let r = compute_readiness(&conn, &[]).unwrap();
+    assert_eq!(r.embedding_backend, "configured_provider");
+    assert!(!r.local_ready);
+}

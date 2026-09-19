@@ -6,7 +6,7 @@
 //! DB lock burst. Cancel via `abort_all` — no DB writes from cancelled tasks.
 //!
 //! [`EmbeddingBatchSender`] trait mirrors `IngestLlmSender` (production:
-//! [`HttpEmbeddingBatchSender`]; tests: fake). Progress via `embedding:progress` /
+//! [`BackendEmbeddingBatchSender`]; tests: fake). Progress via `embedding:progress` /
 //! `embedding:done` events.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,9 +20,11 @@ use crate::db::app_settings_repo::{self, EmbeddingStatus};
 use crate::db::connection::{lock_conn, DbState};
 use crate::db::embedding_repo::{self, NewEmbeddingRow};
 use crate::db::llm_config_repo;
+use crate::embedding::backend::EmbeddingBackend;
 use crate::embedding::director::{compute_work_list, EmbeddingScope, SkipReason};
+use crate::embedding::local::engine::{EnginePaths, LocalEngine};
+use crate::embedding::local::prompt::EmbeddingRole;
 use crate::error::AppError;
-use crate::llm::embedding::probe_embedding_support;
 use crate::llm::orchestrator::{send_embedding_batch_parallel, LlmOrchestrator};
 use crate::models::llm_config::LlmConfig;
 
@@ -46,8 +48,9 @@ pub fn resolve_effective_dim(probe_dim: i32, returned_dim: i32) -> i32 {
     }
 }
 
-/// Injectable sender (mirrors `IngestLlmSender`). Production: [`HttpEmbeddingBatchSender`];
-/// tests: fake with deterministic vectors.
+/// Injectable sender (mirrors `IngestLlmSender`). Production: [`BackendEmbeddingBatchSender`]
+/// (backend-aware; its cloud branch delegates to the orchestrator); tests:
+/// fake with deterministic vectors.
 #[async_trait]
 pub trait EmbeddingBatchSender: Send + Sync {
     /// Embed `texts`, returning ONE vector per input in input order, plus the
@@ -59,30 +62,134 @@ pub trait EmbeddingBatchSender: Send + Sync {
         texts: &[String],
         model: &str,
     ) -> Result<(Vec<Vec<f32>>, i32), AppError>;
+
+    /// Probe embedding capability for this sender's backend (plan §7). The
+    /// default is the cloud probe via HTTP (returns `disabled` with "LLM not
+    /// configured" when there is no config); backend-aware senders override
+    /// it for the local path with the offline probe.
+    async fn probe_capability(
+        &self,
+        config: Option<&LlmConfig>,
+        override_model: Option<&str>,
+    ) -> crate::llm::embedding::ProbeOutcome {
+        let Some(config) = config else {
+            return crate::llm::embedding::ProbeOutcome {
+                status: "disabled".to_string(),
+                model: String::new(),
+                dimensions: 0,
+                reason: "LLM not configured".to_string(),
+            };
+        };
+        crate::llm::embedding::probe_embedding_support(config, override_model).await
+    }
+
+    /// Provider identity written into the `provider` column of generated
+    /// rows. Default: the configured chat provider (cloud behavior);
+    /// backend-aware senders override for the local backend.
+    fn provider_id(&self, config: &LlmConfig) -> String {
+        format!("{:?}", config.provider)
+    }
 }
 
-/// Production sender delegating to `Arc<LlmOrchestrator>` via [`send_embedding_batch_parallel`].
-pub struct HttpEmbeddingBatchSender {
+/// Backend-aware production sender: `ConfiguredProvider` delegates to the
+/// orchestrator (the pre-local-embeddings behavior, unchanged);
+/// `BangoLocal` runs documents through the local engine with the Document
+/// role prefix (the runner only ever sends corpus rows).
+pub struct BackendEmbeddingBatchSender {
     orchestrator: Arc<LlmOrchestrator>,
+    engine: Arc<LocalEngine>,
+    backend: EmbeddingBackend,
+    engine_paths: EnginePaths,
+    storage_root: std::path::PathBuf,
 }
 
-impl HttpEmbeddingBatchSender {
+impl BackendEmbeddingBatchSender {
     #[must_use]
-    pub fn new(orchestrator: Arc<LlmOrchestrator>) -> Self {
-        Self { orchestrator }
+    pub fn new(
+        orchestrator: Arc<LlmOrchestrator>,
+        engine: Arc<LocalEngine>,
+        backend: EmbeddingBackend,
+        storage_root: &std::path::Path,
+    ) -> Self {
+        Self {
+            orchestrator,
+            engine,
+            backend,
+            engine_paths: EnginePaths::from_storage_root(storage_root),
+            storage_root: storage_root.to_path_buf(),
+        }
     }
 }
 
 #[async_trait]
-impl EmbeddingBatchSender for HttpEmbeddingBatchSender {
+impl EmbeddingBatchSender for BackendEmbeddingBatchSender {
     async fn send_embedding_batch_parallel(
         &self,
         config: &LlmConfig,
         texts: &[String],
         model: &str,
     ) -> Result<(Vec<Vec<f32>>, i32), AppError> {
-        send_embedding_batch_parallel(&self.orchestrator, config, texts, model).await
+        match self.backend {
+            EmbeddingBackend::ConfiguredProvider => {
+                send_embedding_batch_parallel(&self.orchestrator, config, texts, model).await
+            }
+            EmbeddingBackend::BangoLocal => {
+                self.engine.embed(&self.engine_paths, texts, EmbeddingRole::Document).await
+            }
+        }
     }
+
+    async fn probe_capability(
+        &self,
+        config: Option<&LlmConfig>,
+        override_model: Option<&str>,
+    ) -> crate::llm::embedding::ProbeOutcome {
+        match self.backend {
+            // Cloud selection: the default HTTP probe (config is required).
+            EmbeddingBackend::ConfiguredProvider => {
+                EmbeddingBatchSender::probe_capability(self, config, override_model).await
+            }
+            // Local selection: the offline probe (plan §7) - no cloud call,
+            // no config needed.
+            EmbeddingBackend::BangoLocal => {
+                crate::embedding::service::probe_local(&self.engine, &self.storage_root).await
+            }
+        }
+    }
+
+    fn provider_id(&self, config: &LlmConfig) -> String {
+        match self.backend {
+            EmbeddingBackend::ConfiguredProvider => format!("{:?}", config.provider),
+            EmbeddingBackend::BangoLocal => "bango_local".to_string(),
+        }
+    }
+}
+
+/// Build the backend-aware production sender for command-layer call sites:
+/// resolves the backend selection + storage root from settings under one
+/// brief lock burst (side-effect-free root read - the engine's own gates
+/// handle a missing root), then wraps the managed engine + orchestrator.
+pub fn backend_sender(
+    app_handle: &tauri::AppHandle,
+) -> Result<Arc<dyn EmbeddingBatchSender>, AppError> {
+    use tauri::Manager as _;
+    let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>().inner().clone();
+    let engine = app_handle.state::<Arc<LocalEngine>>().inner().clone();
+    let (backend, storage_root) = {
+        let db = app_handle.state::<DbState>();
+        let conn = lock_conn(&db.conn)?;
+        let b = app_settings_repo::get_embedding_backend(&conn)?;
+        let root = app_settings_repo::get_setting(&conn, app_settings_repo::STORAGE_ROOT_KEY)?
+            .filter(|s| !s.is_empty())
+            .unwrap_or_default();
+        (b, root)
+    };
+    Ok(Arc::new(BackendEmbeddingBatchSender::new(
+        orchestrator,
+        engine,
+        backend,
+        std::path::Path::new(&storage_root),
+    )))
 }
 
 /// The final report from a `generate_embeddings_inner` run.
@@ -160,8 +267,10 @@ pub async fn generate_embeddings_inner(
             let conn = lock_conn(&db_state.conn)?;
             app_settings_repo::get_embedding_model_override(&conn).unwrap_or(None)
         };
-        // Probe (no lock held during HTTP).
-        let outcome = probe_embedding_support(&cfg, override_model.as_deref()).await;
+        // Probe via the sender (backend-aware): cloud senders use the HTTP
+        // probe; the backend-aware sender runs the offline local probe when
+        // `bango_local` is selected (no lock held during either).
+        let outcome = sender.probe_capability(Some(&cfg), override_model.as_deref()).await;
         let new_status = if outcome.status == "enabled" {
             EmbeddingStatus::Enabled
         } else {
@@ -243,7 +352,7 @@ pub async fn generate_embeddings_inner(
     let mut processed = 0usize;
     let mut generated = 0usize;
     let mut errors = 0usize;
-    let provider = format!("{:?}", cfg.provider);
+    let provider = sender.provider_id(&cfg);
 
     // 3. Outer JoinSet: one task per article. Each task:
     //    - clones the Arc<dyn EmbeddingBatchSender> + Arc<LlmConfig> + model

@@ -469,12 +469,15 @@ pub async fn generate_article_ai_summary_inner(
         let article_id_owned = article_id.to_string();
         tokio::task::spawn(async move {
             let db = handle.state::<crate::db::connection::DbState>();
-            let orch = handle.state::<std::sync::Arc<crate::llm::orchestrator::LlmOrchestrator>>();
-            // Wrap the orchestrator into the v2 HttpEmbeddingBatchSender.
+            // Backend-aware production sender (cloud = orchestrator, local = engine).
             let sender: std::sync::Arc<dyn crate::embedding::runner::EmbeddingBatchSender> =
-                std::sync::Arc::new(crate::embedding::runner::HttpEmbeddingBatchSender::new(
-                    std::sync::Arc::clone(&orch),
-                ));
+                match crate::embedding::runner::backend_sender(&handle) {
+                    Ok(sender) => sender,
+                    Err(e) => {
+                        eprintln!("[embedding] post-summary cascade skipped: {e}");
+                        return;
+                    }
+                };
             let scope = crate::embedding::director::EmbeddingScope {
                 article_ids: Some(vec![article_id_owned]),
                 status_filter: None,

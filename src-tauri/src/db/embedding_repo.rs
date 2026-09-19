@@ -171,46 +171,79 @@ pub fn count_embeddings_for_article(conn: &Connection, article_id: &str) -> Resu
     Ok(count)
 }
 
-/// Load embedding rows matching the given dimensionality. Optionally scopes to
-/// articles in `status_filter` (JOIN `articles`). Rows with mismatched `dimensions`
-/// are excluded so a model switch doesn't mix incompatible vectors. `status_filter`
-/// empty = no status filter (all articles).
+/// Load embedding rows matching the given dimensionality - and, when
+/// `model_name` is `Some(non-empty)`, the generating model identity. The
+/// model filter is the authoritative cross-backend/cross-model guard: two
+/// different models can share a dimensionality (Google `text-embedding-004`
+/// and EmbeddingGemma are both 768-dim), and comparing their vectors is
+/// meaningless. `None`/empty keeps the legacy dims-only behavior (callers
+/// without a known model identity). Optionally scopes to articles in
+/// `status_filter` (JOIN `articles`). `status_filter` empty = all articles.
 pub fn list_for_recall(
     conn: &Connection,
     dimensions: i32,
+    model_name: Option<&str>,
     status_filter: &[String],
 ) -> Result<Vec<EmbeddingRow>, AppError> {
+    let model_filter = model_name.filter(|m| !m.is_empty());
     let mut out = Vec::new();
     if status_filter.is_empty() {
         // No status filter: scan article_embeddings directly (no JOIN needed).
-        let sql = "SELECT article_id, chunk_index, embedding, dimensions, \
-             input_hash, model_name, provider FROM article_embeddings WHERE dimensions = ?1";
+        let sql = if model_filter.is_some() {
+            "SELECT article_id, chunk_index, embedding, dimensions, \
+             input_hash, model_name, provider FROM article_embeddings \
+             WHERE dimensions = ?1 AND model_name = ?2"
+        } else {
+            "SELECT article_id, chunk_index, embedding, dimensions, \
+             input_hash, model_name, provider FROM article_embeddings WHERE dimensions = ?1"
+        };
         let mut stmt = conn.prepare(sql)?;
-        let rows = stmt.query_map(params![dimensions], row_to_embedding)?;
+        let rows = match model_filter {
+            Some(model) => stmt.query_map(params![dimensions, model], row_to_embedding)?,
+            None => stmt.query_map(params![dimensions], row_to_embedding)?,
+        };
         for row in rows {
             out.push(row?);
         }
     } else {
         // Build `status IN (?, ?, ?)` with one placeholder per status. No
-        // string interpolation - every status is bound as a parameter, so
-        // arbitrary status strings cannot inject SQL.
-        let placeholders: Vec<&str> = (0..status_filter.len()).map(|_| "?").collect();
-        let in_clause = placeholders.join(", ");
+        // string interpolation of VALUES - every value binds as a parameter
+        // (only placeholder NUMBERS are formatted), so arbitrary status
+        // strings cannot inject SQL. Bind values are boxed (owned) so the
+        // variable-length tail works with `params_from_iter`.
+        let mut conditions: Vec<String> = Vec::new();
+        let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        let mut next_param = 1;
+        conditions.push(format!("e.dimensions = ?{next_param}"));
+        values.push(Box::new(dimensions));
+        next_param += 1;
+        if let Some(model) = model_filter {
+            conditions.push(format!("e.model_name = ?{next_param}"));
+            values.push(Box::new(model.to_string()));
+            next_param += 1;
+        }
+        let status_placeholders: Vec<String> = status_filter
+            .iter()
+            .map(|status| {
+                let placeholder = format!("?{next_param}");
+                next_param += 1;
+                values.push(Box::new(status.clone()));
+                placeholder
+            })
+            .collect();
+        conditions.push(format!("a.status IN ({})", status_placeholders.join(", ")));
         let sql = format!(
             "SELECT e.article_id, e.chunk_index, e.embedding, e.dimensions, \
              e.input_hash, e.model_name, e.provider \
              FROM article_embeddings e JOIN articles a ON a.id = e.article_id \
-             WHERE e.dimensions = ?1 AND a.status IN ({in_clause})"
+             WHERE {}",
+            conditions.join(" AND ")
         );
         let mut stmt = conn.prepare(&sql)?;
-        // Bind dimensions first (?1), then each status in order (?2..=?N).
-        // rusqlite's `params_from_iter` handles the variable-length tail.
-        let dim_string_pairs: Vec<&dyn rusqlite::ToSql> =
-            std::iter::once(&dimensions as &dyn rusqlite::ToSql)
-                .chain(status_filter.iter().map(|s| s as &dyn rusqlite::ToSql))
-                .collect();
-        let rows =
-            stmt.query_map(rusqlite::params_from_iter(dim_string_pairs.iter()), row_to_embedding)?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(values.iter().map(|v| v.as_ref())),
+            row_to_embedding,
+        )?;
         for row in rows {
             out.push(row?);
         }

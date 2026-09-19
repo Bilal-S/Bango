@@ -1,87 +1,55 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue';
+/**
+ * Chat view: the /chat route. A thin orchestration shell over per-concern
+ * composables + components - the citation-finder orchestration lives in
+ * `use-citation-finder-chat`, wiki mode in `use-chat-wiki`, article context
+ * selection in `use-chat-article-context`, and transcript scrolling in
+ * `use-chat-transcript`. The heavy markup lives in dedicated components
+ * (welcome cards, message list, selected-articles bar, selector modal,
+ * citation input area, the mismatch + local-embeddings dialogs).
+ */
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { tauriCommand } from '@/composables/use-tauri-command';
+import { storeToRefs } from 'pinia';
 import { useChatStore } from '@/stores/chat';
 import { useToast } from '@/composables/use-toast';
-import type { Article } from '@/types';
-import type { WikiStatus } from '@/types/wiki';
-import type { CitationResult, CitationStyle } from '@/types/citation-finder';
-import { marked } from 'marked';
-import { renderWikiMarkdown } from '@/utils/wiki-markdown';
-import { scrollAnchorToContainerTop } from '@/utils/chat-scroll';
+import { useLlmConfigured } from '@/composables/use-llm-configured';
+import { useLlmConfigStore } from '@/stores/llm-config';
+import { stopCitationListeners } from '@/composables/use-citation-finder';
+import { useLocalEmbeddings } from '@/composables/use-local-embeddings';
 import { useArticleSearch } from '@/composables/use-article-search';
 import { useScreening } from '@/composables/use-screening';
-import { useWiki } from '@/composables/use-wiki';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { useArticleDelete } from '@/composables/use-article-delete';
 import { useClearAiReasoning } from '@/composables/use-clear-ai-reasoning';
-import { useLlmConfigured } from '@/composables/use-llm-configured';
-import { useLlmConfigStore } from '@/stores/llm-config';
-import {
-  getReadiness,
-  stopCitationListeners,
-  getModelMismatch,
-  regenerateEmbeddings,
-} from '@/composables/use-citation-finder';
+import { useChatArticleContext } from '@/composables/use-chat-article-context';
+import { useChatWiki } from '@/composables/use-chat-wiki';
+import { useChatTranscript } from '@/composables/use-chat-transcript';
+import { useCitationFinderChat } from '@/composables/use-citation-finder-chat';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import WikiPageViewer from '@/components/wiki/wiki-page-viewer.vue';
-import CitationResultCard from '@/components/citation-result-card.vue';
-import type { WikiSourceInfo } from '@/types/wiki';
-import type { CitationFinderMode, EmbeddingModelMismatch } from '@/types/citation-finder';
+import ChatWelcomeCards from '@/components/chat-welcome-cards.vue';
+import ChatMessageList from '@/components/chat-message-list.vue';
+import SelectedArticlesBar from '@/components/selected-articles-bar.vue';
+import ArticleSelectorModal from '@/components/article-selector-modal.vue';
+import CitationInputArea from '@/components/citation-input-area.vue';
+import CitationMismatchDialog from '@/components/citation-mismatch-dialog.vue';
+import CitationLocalEmbeddingsDialog from '@/components/citation-local-embeddings-dialog.vue';
 
 const router = useRouter();
 const toast = useToast();
 const chatStore = useChatStore();
 const llmConfigStore = useLlmConfigStore();
 
-/** Reactive LLM-configured gate from canonical composable. Replaces former
- *  local ref populated by one-shot `has_llm_config` that went stale on
- *  Settings edits. */
+/** Reactive LLM-configured gate from the canonical composable (src/AGENTS.md). */
 const isLlmConfigured = useLlmConfigured();
-/** True while LLM config store is loading for the first time. Prevents
+/** True while the LLM config store is loading for the first time. Prevents
  *  flashing the unconfigured card before bootstrap resolves. */
 const checkingLlm = computed(() => !llmConfigStore.initialized);
-const articles = ref<Article[]>([]);
-const showSelector = ref(false);
-const searchQuery = ref('');
-const chatScrollContainer = ref<HTMLElement | null>(null);
 
 const isDetailFullScreen = ref(false);
 
-// Wiki-mode UI state.
-const checkingWiki = ref(true);
-/** Wiki reader slide-over nav stack. Last entry is visible page; popping
- *  back to empty closes the panel. Stack lets [[wikilink]] clicks chain. */
-const wikiNavStack = ref<string[]>([]);
-const wikiPanelOpen = computed(() => wikiNavStack.value.length > 0);
-const wikiSlug = computed(() => wikiNavStack.value[wikiNavStack.value.length - 1] ?? null);
-
-/** Wiki page slug-to-title map. Loaded once so bare UUIDs in wiki-sourced
- *  chat bubbles render with human-readable titles instead of raw UUIDs. */
-const wikiPageTitles = ref<Map<string, string>>(new Map());
-const { listPages: wikiListPages, checkForUpdates: wikiCheckForUpdates } = useWiki();
-
-/**
- * Derived source-metadata map (article id -> WikiSourceInfo) built reactively
- * from loaded `articles`. Passed to `renderWikiMarkdown` so bare article UUIDs
- * in wiki-sourced chat render as green `.art-ref` chips.
- */
-const wikiSources = computed(() => {
-  const map = new Map<string, WikiSourceInfo>();
-  for (const a of articles.value) {
-    map.set(a.id, {
-      id: a.id,
-      title: a.title,
-      authors: a.authors ?? [],
-      year: a.publicationYear ?? null,
-      doi: a.doi ?? null,
-      abstractText: a.abstractText ?? '',
-      journal: a.journal ?? null,
-    });
-  }
-  return map;
-});
+/* ── Article detail panel + wiki reader slide-overs ──────────────────────── */
 
 const {
   selectedArticle: detailArticle,
@@ -103,7 +71,7 @@ const { screenArticle } = useScreening();
 
 /* Article delete orchestration centralized in `useArticleDelete`. Composable
  * nulls `detailArticle` (hides panel via `v-if`); `onDeleted` hook resets
- * fullscreen flag. */
+ * the fullscreen flag. */
 const { handleDeleteArticle } = useArticleDelete({
   deleteArticle,
   onDeleted: () => {
@@ -111,7 +79,99 @@ const { handleDeleteArticle } = useArticleDelete({
   },
 });
 
-// Synchronize updates from the detail view back into the chat's article list
+// Full-text attach + AI-reasoning clear orchestration live in shared
+// composables (used by the other detail-panel host views too).
+const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
+const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
+
+/* ── Per-concern composables ─────────────────────────────────────────────── */
+
+const { selectedArticleIds, source: chatSource, wikiReady, messages } = storeToRefs(chatStore);
+
+const { articles, showSelector, selectedArticles, loadArticles, toggleArticleSelection } =
+  useChatArticleContext({
+    selectedArticleIds,
+    addSelectedArticle: chatStore.addSelectedArticle,
+    removeSelectedArticle: chatStore.removeSelectedArticle,
+  });
+
+const {
+  wikiPanelOpen,
+  wikiNavStack,
+  wikiSlug,
+  wikiPageTitles,
+  wikiSources,
+  checkWikiStatus,
+  onToggleWiki,
+  openWikiPage,
+  navigateWiki,
+  goBackWiki,
+  closeWikiPanel,
+} = useChatWiki({
+  source: chatSource,
+  wikiReady,
+  setWikiReady: chatStore.setWikiReady,
+  setSource: chatStore.setSource,
+  toggleWikiMode: chatStore.toggleWikiMode,
+  articles,
+  /* The reader and the article panel are mutually exclusive slide-overs. */
+  onOpenWikiReader: () => {
+    detailArticle.value = null;
+  },
+});
+
+/** The scrollable transcript container (bound via the template ref). */
+const chatScrollContainer = ref<HTMLElement | null>(null);
+
+const { scrollToBottom } = useChatTranscript({ messages, chatScrollContainer });
+
+const localEmbeddings = useLocalEmbeddings();
+
+const citation = useCitationFinderChat({
+  chatStore,
+  isLlmConfigured,
+  localEmbeddings,
+  /* Deferred self-reference: the arrows below only run after `citation`
+   * itself is initialized, so the late binding is safe. */
+  checkReadiness: () => citation.checkCitationFinderReadiness(),
+  runSearch: async (text: string) => {
+    await chatStore.sendCitationSearch(text, citation.citationStatusFilter.value);
+    scrollToBottom();
+  },
+});
+
+const {
+  citationStatuses,
+  isCitationMode,
+  citationToggleState,
+  citationToggleTitle,
+  checkCitationFinderReadiness,
+  onSetCitationMode,
+  onToggleCitationFinder,
+  handleCitationSend,
+  mismatchDialog,
+  regenerating,
+  confirmMismatchRegenerate,
+  continueMismatchSearch,
+  cancelMismatchDialog,
+  localPromptOpen,
+  confirmLocalDownload,
+  confirmLocalUseCloud,
+  cancelLocalPrompt,
+  handleCopyCitation,
+} = citation;
+
+/** Status-checkbox updates arrive as fresh objects from the input area. */
+function onStatusesChange(next: typeof citationStatuses.value): void {
+  citationStatuses.value = next;
+}
+
+/* Reactively re-check readiness when LLM config changes (provider switch,
+ * Test Connection). Deep watch because the config object is mutated in
+ * place by Settings auto-save. */
+citation.watchLlmConfig(computed(() => llmConfigStore.config));
+
+/* Synchronize updates from the detail view back into the chat's article list. */
 watch(detailArticle, (newVal) => {
   if (newVal) {
     const idx = articles.value.findIndex((a) => a.id === newVal.id);
@@ -123,314 +183,24 @@ watch(detailArticle, (newVal) => {
   }
 });
 
-/** Citation-finder status-filter checkboxes state. Working + Included default
- *  ON, Rejected default OFF, Duplicate always excluded (hidden). */
-const citationStatuses = ref({
-  working: true,
-  included: true,
-  rejected: false,
-});
-
-/** Computed status filter array passed to the backend. Mirrors the checkbox
- *  state; duplicates are never included. */
-const citationStatusFilter = computed(() => {
-  const out: string[] = [];
-  if (citationStatuses.value.working) out.push('working');
-  if (citationStatuses.value.included) out.push('included');
-  if (citationStatuses.value.rejected) out.push('rejected');
-  return out;
-});
-
-/** Whether the citation-finder input area is shown (source === 'citation-
- *  finder'). Drives the v-if that swaps the article-context pills for the
- *  citation toolbar + prose textarea. */
-const isCitationMode = computed(() => chatStore.source === 'citation-finder');
-
-/**
- * The Citation Finder toggle's visible/disabled/hidden state, derived from
- * the readiness payload's `embeddingStatus` triple-state. Replaces the former
- * boolean-only gate (`providerSupportsEmbeddings`) which silently hid the
- * toggle on known-unsupported providers (Anthropic, Z.AI) - leaving the user
- * with no indication the feature existed or that switching providers would
- * unlock it.
- *
- * - `'enabled'`: embeddings are working; toggle is clickable.
- * - `'unknown'`: probe has not run yet; toggle is clickable (Phase B will
- *   probe on first run).
- * - `'disabled'`: provider is known to not support embeddings; toggle renders
- *   but is `disabled` with a tooltip pointing the user to Settings.
- * - `'hidden'`: readiness has not loaded yet (initial mount) OR the LLM is
- *   not configured (the whole chat workspace is gated on `isLlmConfigured`).
- */
-const citationToggleState = computed<'enabled' | 'unknown' | 'disabled' | 'hidden'>(() => {
-  const r = chatStore.citationReadiness;
-  if (!r || !isLlmConfigured.value) return 'hidden';
-  return r.embeddingStatus;
-});
-
-/** Tooltip for the Citation Finder toggle, varying by state. */
-const citationToggleTitle = computed(() => {
-  if (isCitationMode.value) {
-    return 'Citation Finder active. Click to return to article context.';
-  }
-  switch (citationToggleState.value) {
-    case 'disabled':
-      return 'Current provider does not support embeddings. Switch to an embedding-capable provider (e.g. OpenAI, Ollama) in Settings to use Citation Finder.';
-    case 'unknown':
-      return 'Find citations for text you are writing (semantic search over your library). First run will prepare embeddings.';
-    default:
-      return 'Find citations for text you are writing (semantic search over your library)';
-  }
-});
-
-/** Citation-finder readiness check. Populates `chatStore.citationReadiness`
- *  (drives the 3rd toggle's visible/disabled/hidden state via
- *  `citationToggleState`). Runs on mount, after Settings edits (via the
- *  `llmConfigStore.config` watcher), and after a regenerate completes. */
-async function checkCitationFinderReadiness() {
+/** Open the article detail slide-over (closes the wiki reader so only one
+ *  slide-over is visible at a time). */
+async function openArticleDetail(articleId: string) {
+  closeWikiPanel();
   try {
-    const r = await getReadiness(citationStatusFilter.value);
-    chatStore.setCitationReadiness(r);
+    await selectArticle(articleId);
   } catch {
-    // Provider not configured / IPC error → hide the toggle.
-    chatStore.setCitationReadiness(null);
+    toast.show('Failed to load article details', 'error');
   }
 }
 
-/* Reactively re-check readiness when LLM config changes (provider switch,
- * Test Connection). Mirrors canonical `useLlmConfigured()` pattern. Deep
- * watch because config object is mutated in place by Settings auto-save. */
-watch(
-  () => llmConfigStore.config,
-  () => {
-    void checkCitationFinderReadiness();
-  },
-  { deep: true }
-);
-
-/* Model-mismatch confirmation dialog. Before each submit, checks
- * `get_embedding_model_mismatch`: if stored embeddings were generated with a
- * different model, `recall` would silently return zero hits (filters by new
- * dimensions). Three options: Regenerate (delete all + re-embed), Continue
- * (proceed with partial recall), Cancel. Dialog fires once per stored-model
- * key per session (`mismatchDismissedFor`). */
-
-/** The active model-mismatch payload when the dialog is open; `null` when
- *  closed. Set by `handleCitationSend` before dispatching the search. */
-const mismatchDialog = ref<EmbeddingModelMismatch | null>(null);
-
-/** The prose text held while the mismatch dialog is open; re-dispatched via
- *  `continueSearch` when the user clicks "Continue anyway". */
-const pendingSearchText = ref('');
-
-/** True while the "Regenerate" action is dispatching (disables the dialog's
- *  buttons + shows a spinner so the user knows the regenerate started). */
-const regenerating = ref(false);
-
-/** Citation-style <select> options (the shared 5-style list). */
-const citationStyleOptions: CitationStyle[] = ['APA', 'MLA', 'Chicago', 'IEEE', 'AMA'];
-
-/** Mode toggle handler (segmented button). */
-function onSetCitationMode(mode: CitationFinderMode) {
-  chatStore.setCitationFinderMode(mode);
-}
-
-/** Flip the citation-finder source on. Mutually exclusive with wiki (entering
- *  citation mode drops back from wiki if it was on). */
-function onToggleCitationFinder() {
-  if (chatStore.source === 'citation-finder') {
-    chatStore.setSource('articles');
-  } else {
-    chatStore.setSource('citation-finder');
-  }
-}
-
-/**
- * Submit the citation search. Driven by the prose textarea + the Find
- * Citations button + Ctrl/Cmd+Enter. Before dispatching, performs the cheap
- * model-mismatch pre-check: if stored embeddings were generated with a
- * different model than the current `embedding_model` setting, `recall` would
- * silently return zero hits (it filters by the new dimensions), so we pop a
- * confirmation dialog. The dialog only fires once per stored-model key per
- * session (`chatStore.mismatchDismissedFor`) so it doesn't nag on every
- * subsequent search.
- *
- * Threads the live status-filter checkboxes to the store's dedicated
- * `sendCitationSearch`, which forwards them to the backend. The backend
- * filters against the whitelist and applies NO default - an empty array
- * (all checkboxes unchecked) returns the "No articles match the selected
- * filters." empty result.
- */
-async function handleCitationSend() {
-  /* The Find button is `:disabled` when prose is empty, but Ctrl/Cmd+Enter
-   * bypasses disabled button, so guard here + show toast. */
-  if (!chatStore.citationDraft.trim()) {
-    toast.show('Please paste text to search.', 'info');
-    return;
-  }
-  if (chatStore.loading) return;
-  const text = chatStore.citationDraft;
-  chatStore.citationDraft = '';
-
-  /* Cheap pre-check: detect stored-model mismatch before searching. One
-   * SELECT DISTINCT + COUNT(*) (sub-ms), safe to run on every submit. When
-   * mismatch detected AND not dismissed for this key, pop the dialog. */
-  try {
-    const mismatch = await getModelMismatch();
-    if (
-      mismatch &&
-      mismatch.storedModel &&
-      chatStore.mismatchDismissedFor !== mismatch.storedModel
-    ) {
-      mismatchDialog.value = mismatch;
-      pendingSearchText.value = text;
-      return;
-    }
-  } catch {
-    // Non-fatal: if the mismatch IPC fails, proceed with the search. The
-    // user will see whatever results recall produces (possibly empty).
-  }
-
-  await runCitationSearch(text);
-}
-
-/** Run the actual citation search (store delegate). Extracted so the mismatch
- *  dialog's "Continue anyway" path can re-dispatch the held prose. */
-async function runCitationSearch(text: string) {
-  await chatStore.sendCitationSearch(text, citationStatusFilter.value);
+/** Send an article/wiki chat message through the store, then scroll. */
+async function handleSend() {
+  if (!chatStore.inputDraft.trim() || chatStore.loading) return;
+  const msg = chatStore.inputDraft;
+  chatStore.inputDraft = '';
+  await chatStore.sendMessage(msg);
   scrollToBottom();
-}
-
-/**
- * Confirm the model-mismatch dialog: regenerate all embeddings in the active
- * status scope. The backend `regenerate_embeddings` deletes every row in the
- * scope then re-runs `generate_embeddings_inner` (which probes + embeds every
- * article). The dialog closes immediately + the user watches the embedding
- * progress bar in the citation input area (Phase B).
- *
- * The held prose is NOT auto-submitted after the regenerate because the
- * regeneration is async + the user should search again once it completes (the
- * progress UI communicates completion via `embedding:done`). The held prose
- * is restored to the textarea so the user can re-submit with one click.
- */
-async function confirmMismatchRegenerate() {
-  if (!mismatchDialog.value || regenerating.value) return;
-  regenerating.value = true;
-  try {
-    /* Scope regeneration to same statuses the search uses so we don't wipe
-     * embeddings generated for other statuses via standalone Settings. */
-    const scope = citationStatusFilter.value.join(',');
-    await regenerateEmbeddings(scope);
-    toast.show(
-      'Regenerating embeddings in the background. Search again once the progress bar completes.',
-      'info'
-    );
-    // Restore the held prose so the user can re-submit after the regenerate.
-    chatStore.citationDraft = pendingSearchText.value;
-    pendingSearchText.value = '';
-    /* Mark mismatch resolved so dialog doesn't re-fire for same stored model
-     * if user searches again before regenerate completes. */
-    chatStore.setMismatchDismissed(mismatchDialog.value.storedModel);
-    mismatchDialog.value = null;
-    // Re-fetch readiness so the toggle + coverage reflect the regeneration
-    // starting (coverage will drop to 0% then climb).
-    void checkCitationFinderReadiness();
-  } catch (e) {
-    toast.show(
-      `Failed to start regeneration: ${e instanceof Error ? e.message : String(e)}`,
-      'error'
-    );
-  } finally {
-    regenerating.value = false;
-  }
-}
-
-/** Continue with the search despite the model mismatch. Records the dismissal
- *  so the dialog does not re-fire for the same stored model this session, then
- *  dispatches the held prose. */
-async function continueMismatchSearch() {
-  if (!mismatchDialog.value) return;
-  const text = pendingSearchText.value;
-  chatStore.setMismatchDismissed(mismatchDialog.value.storedModel);
-  mismatchDialog.value = null;
-  pendingSearchText.value = '';
-  await runCitationSearch(text);
-}
-
-/** Cancel the mismatch dialog: clears the held prose + closes the dialog
- *  without recording a dismissal (so the next submit re-evaluates). */
-function cancelMismatchDialog() {
-  mismatchDialog.value = null;
-  pendingSearchText.value = '';
-}
-
-/** Copy a citation string to the clipboard + toast. */
-async function handleCopyCitation(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast.show('Citation copied to clipboard.', 'success');
-  } catch {
-    toast.show('Failed to copy citation.', 'error');
-  }
-}
-
-/** Flatten a `CitationResult[]` into a single card list for IEEE `[N]`
- *  numbering across the whole bubble (per-bubble numbering). Returns the
- *  matches + their 1-based index in display order. */
-function flattenForIeee(results: CitationResult[]): Array<{
-  match: CitationResult['matches'][number];
-  ieeeIndex: number;
-  claim: string | null;
-}> {
-  const out: Array<{
-    match: CitationResult['matches'][number];
-    ieeeIndex: number;
-    claim: string | null;
-  }> = [];
-  let idx = 1;
-  for (const group of results) {
-    for (const match of group.matches) {
-      out.push({ match, ieeeIndex: idx, claim: group.claim });
-      idx += 1;
-    }
-  }
-  return out;
-}
-
-/* Per-statement claim-group collapse state. Each claim heading is a caret
- * toggle. Default expanded. Keyed by `${msgIdx}::${claim}` so re-searches
- * stay independent; state survives as long as message list is append-only. */
-const collapsedClaims = ref<Set<string>>(new Set());
-
-/** Build the per-bubble key for a claim's collapse state. */
-function claimKey(msgIdx: number, claim: string): string {
-  return `${msgIdx}::${claim}`;
-}
-
-/** Whether a given claim's cards are currently collapsed. */
-function isClaimCollapsed(msgIdx: number, claim: string): boolean {
-  return collapsedClaims.value.has(claimKey(msgIdx, claim));
-}
-
-/** Toggle a claim's collapse state (add/remove from the Set). Mutating a
- *  `Set` in place doesn't trigger reactivity, so we reassign the ref to a
- *  fresh `Set` constructed from the updated contents. */
-function toggleClaimCollapsed(msgIdx: number, claim: string): void {
-  const key = claimKey(msgIdx, claim);
-  const next = new Set(collapsedClaims.value);
-  if (next.has(key)) {
-    next.delete(key);
-  } else {
-    next.add(key);
-  }
-  collapsedClaims.value = next;
-}
-
-/** Count the cards under a given claim (for the count badge). Reuses the same
- *  filter predicate the template uses so the number always matches what would
- *  render when expanded. */
-function claimCardCount(results: CitationResult[], claim: string): number {
-  return flattenForIeee(results).filter((c) => c.claim === claim).length;
 }
 
 onMounted(async () => {
@@ -445,261 +215,6 @@ onMounted(async () => {
 onUnmounted(() => {
   stopCitationListeners();
 });
-
-/** Fetch wiki status and flip the store's `wikiReady` flag (drives toggle
- *  visibility). The wiki toggle only appears when the wiki is initialized AND
- *  has at least one page. */
-async function checkWikiStatus() {
-  try {
-    const status = await tauriCommand<WikiStatus>('wiki_get_status');
-    chatStore.setWikiReady(!!status.initialized && status.pageCount > 0);
-    // If the wiki became unavailable while wiki mode was on, drop back to articles.
-    if (!chatStore.wikiReady && chatStore.source === 'wiki') {
-      chatStore.setSource('articles');
-    }
-    // Load page titles so wiki chat bubbles can render bare UUIDs as
-    // synthesis-styled chips with human-readable titles.
-    if (chatStore.wikiReady && wikiPageTitles.value.size === 0) {
-      try {
-        const pages = await wikiListPages();
-        const map = new Map<string, string>();
-        for (const p of pages) {
-          map.set(p.slug, p.title);
-        }
-        wikiPageTitles.value = map;
-      } catch {
-        // Non-fatal: bare UUIDs fall back to raw text.
-      }
-    }
-  } catch {
-    chatStore.setWikiReady(false);
-  } finally {
-    checkingWiki.value = false;
-  }
-
-  /* When wiki is ready, proactively run on-demand drift check so wiki-mode
-   * chat reflects external edits since last visit. Debounced 30s via useWiki. */
-  if (chatStore.wikiReady) {
-    try {
-      const result = await wikiCheckForUpdates(false);
-      if (result?.rebuilt) {
-        toast.show(`Wiki updated: ${result.pagesReindexed} pages re-indexed.`, 'success');
-      }
-    } catch {
-      // Non-fatal: wiki chat still works with the existing index.
-    }
-  }
-}
-
-async function loadArticles() {
-  try {
-    const all = await tauriCommand<Article[]>('get_articles');
-    // Filter out duplicates (duplicate_of is not null or status is duplicate)
-    articles.value = all.filter((a) => a.status !== 'duplicate' && !a.duplicateOf);
-  } catch {
-    toast.show('Failed to load articles list', 'error');
-  }
-}
-
-function truncateString(str: string, maxLen = 20): string {
-  if (!str) return '';
-  if (str.length <= maxLen) return str;
-  return str.slice(0, maxLen - 3) + '...';
-}
-
-// Format author to be up to 20 chars
-function getAuthorText(article: Article): string {
-  const author = article.authors?.[0] ?? 'Unknown';
-  return truncateString(author, 20);
-}
-
-// Format title to be up to 20 chars
-function getTitleText(article: Article): string {
-  return truncateString(article.title, 20);
-}
-
-const selectedArticles = computed(() => {
-  return articles.value.filter((a) => chatStore.selectedArticleIds.includes(a.id));
-});
-
-const filteredArticles = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase();
-  if (!q) return articles.value;
-  return articles.value.filter(
-    (a) =>
-      a.title.toLowerCase().includes(q) ||
-      a.authors.some((author) => author.toLowerCase().includes(q)) ||
-      (a.journal && a.journal.toLowerCase().includes(q)) ||
-      (a.publicationYear && String(a.publicationYear).includes(q))
-  );
-});
-
-function toggleArticleSelection(id: string) {
-  if (chatStore.selectedArticleIds.includes(id)) {
-    chatStore.removeSelectedArticle(id);
-  } else {
-    chatStore.addSelectedArticle(id);
-  }
-}
-
-/** Flip the wiki / article retrieval mode. */
-function onToggleWiki() {
-  const next = chatStore.toggleWikiMode();
-  if (next === 'wiki') {
-    // Entering wiki mode: article context is irrelevant, hide it to reduce clutter.
-    toast.show('Wiki mode: answers are grounded by FTS5 search over your wiki pages.', 'info');
-  }
-}
-
-async function handleSend() {
-  if (!chatStore.inputDraft.trim() || chatStore.loading) return;
-  const msg = chatStore.inputDraft;
-  chatStore.inputDraft = '';
-  await chatStore.sendMessage(msg);
-  scrollToBottom();
-}
-
-function scrollToBottom() {
-  void nextTick(() => {
-    if (chatScrollContainer.value) {
-      chatScrollContainer.value.scrollTop = chatScrollContainer.value.scrollHeight;
-    }
-  });
-}
-
-/**
- * When citation results arrive (`citation:done` pushes the assistant bubble),
- * pin the user's claim entry - the user message immediately preceding the
- * citation bubble - to the top of the chat scroll area so the result cards
- * are visible beneath it without manual scrolling. In per-statement mode the
- * first claim group renders directly under the same anchor.
- */
-function scrollClaimEntryToTop() {
-  void nextTick(() => {
-    const container = chatScrollContainer.value;
-    if (!container) return;
-    const msgs = chatStore.messages;
-    const last = msgs.length - 1;
-    if (last < 0 || !msgs[last]?.citations) return;
-    // Anchor on the nearest preceding user message; fall back to the
-    // citation bubble itself when no user message precedes it.
-    let anchorIdx = last;
-    for (let i = last - 1; i >= 0; i -= 1) {
-      if (msgs[i]?.role === 'user') {
-        anchorIdx = i;
-        break;
-      }
-    }
-    const anchor = container.querySelector<HTMLElement>(`[data-msg-idx="${anchorIdx}"]`);
-    if (anchor) {
-      scrollAnchorToContainerTop(container, anchor);
-    }
-  });
-}
-
-/* Fire when the trailing message gains a non-empty citations array - the
-exact moment citation results land in the transcript (`citation:done`). */
-watch(
-  () => chatStore.messages[chatStore.messages.length - 1]?.citations,
-  (citations) => {
-    if (citations && citations.length > 0) scrollClaimEntryToTop();
-  }
-);
-
-function formatAuthorsList(authors: string[]): string {
-  if (!authors || authors.length === 0) return 'Unknown';
-  if (authors.length <= 2) return authors.join('; ');
-  return `${authors[0]}; ${authors[1]} et al.`;
-}
-
-/**
- * Render an assistant message body. Wiki-sourced messages go through the shared
- * wiki renderer so `[[slug]]` citations become clickable `.wikilink` spans;
- * article-sourced messages use plain `marked` (no wikilink interpretation, so
- * bracketed text in article content is never misinterpreted).
- */
-function renderMessage(msg: { role: string; content: string; source?: string }): string {
-  if (msg.source === 'wiki') {
-    return renderWikiMarkdown(msg.content, {
-      sources: wikiSources.value,
-      pageTitles: wikiPageTitles.value,
-      /* Chat view: articles win over wiki pages for bare UUID resolution.
-       * Article UUID renders as green art-ref even when synthesis page exists. */
-      articlePriority: true,
-    });
-  }
-  return marked.parse(msg.content) as string;
-}
-
-/** Delegated click handler for assistant bubbles: detect wiki links and
- *  article references and route them to the right slide-over. */
-function handleBubbleClick(event: MouseEvent) {
-  const target = event.target as HTMLElement;
-  if (target.classList.contains('wikilink')) {
-    const slug = target.getAttribute('data-slug');
-    if (slug) openWikiPage(slug);
-  } else if (target.classList.contains('art-ref')) {
-    const artId = target.getAttribute('data-art-id');
-    if (artId) void openArticleDetail(artId);
-  }
-}
-
-/** Open the wiki reader slide-over on a given slug. Closes the article panel so
- *  only one slide-over is visible at a time. */
-function openWikiPage(slug: string) {
-  // Mutually exclusive with the article detail panel.
-  detailArticle.value = null;
-  wikiNavStack.value = [slug];
-}
-
-/** Inner [[wikilink]] navigation: push onto the stack so the back button works. */
-function navigateWiki(slug: string) {
-  wikiNavStack.value = [...wikiNavStack.value, slug];
-}
-
-/** Pop the wiki reader back-stack; close the panel when the stack is empty. */
-function goBackWiki() {
-  wikiNavStack.value = wikiNavStack.value.slice(0, -1);
-}
-
-/** Close the wiki reader entirely (clears history). */
-function closeWikiPanel() {
-  wikiNavStack.value = [];
-}
-
-// Tooltip state for hovered articles in context pills
-const hoveredArticle = ref<Article | null>(null);
-const tooltipX = ref(0);
-const tooltipY = ref(0);
-
-function handleMouseEnter(event: MouseEvent, article: Article) {
-  hoveredArticle.value = article;
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-  tooltipX.value = rect.left + rect.width / 2;
-  tooltipY.value = rect.top;
-}
-
-function handleMouseLeave() {
-  hoveredArticle.value = null;
-}
-
-async function openArticleDetail(articleId: string) {
-  // Mutually exclusive with the wiki reader panel.
-  closeWikiPanel();
-  try {
-    await selectArticle(articleId);
-  } catch {
-    toast.show('Failed to load article details', 'error');
-  }
-}
-
-// Full-text attach UI orchestration is centralized in
-// `useFullTextAttachment` (shared with the other detail-panel host views).
-const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
-
-/* AI-reasoning clear orchestration centralized in `useClearAiReasoning`.
- * Composable owns toast; `useArticleSearch.clearAiReasoning` owns IPC + refresh. */
-const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
 </script>
 
 <template>
@@ -765,249 +280,27 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
           class="flex-1 overflow-y-auto p-container-padding space-y-4 flex flex-col"
         >
           <!-- Welcome state: three-column overview of the three chat modes -->
-          <div v-if="chatStore.messages.length === 0" class="my-auto py-8 w-full max-w-5xl mx-auto">
-            <div class="chat-welcome-grid">
-              <!-- Academic Research Chat -->
-              <div class="chat-welcome-card">
-                <div class="chat-welcome-card__icon chat-welcome-card__icon--indigo">
-                  <span class="material-symbols-outlined">chat_add_on</span>
-                </div>
-                <h3 class="chat-welcome-card__title">Academic Research Chat</h3>
-                <p class="chat-welcome-card__desc">
-                  Ask questions about the articles in your library. Add articles to the context
-                  using the <strong>(+)</strong> button to ground the responses in specific research
-                  text.
-                </p>
-                <p class="chat-welcome-card__hint">
-                  <span class="material-symbols-outlined">add_circle</span>
-                  Click <strong>(+)</strong> to select articles, then type your question.
-                </p>
-              </div>
+          <ChatWelcomeCards
+            v-if="chatStore.messages.length === 0"
+            :wiki-ready="chatStore.wikiReady"
+            :citation-toggle-state="citationToggleState"
+          />
 
-              <!-- Wiki Chat -->
-              <div class="chat-welcome-card">
-                <div class="chat-welcome-card__icon chat-welcome-card__icon--purple">
-                  <span class="material-symbols-outlined">local_library</span>
-                </div>
-                <h3 class="chat-welcome-card__title">Wiki Chat</h3>
-                <p class="chat-welcome-card__desc">
-                  Ask questions answered from your synthesized knowledge base. The Wiki is built
-                  from your included articles and retrieves the most relevant pages for each
-                  question.
-                </p>
-                <p v-if="chatStore.wikiReady" class="chat-welcome-card__hint">
-                  <span class="material-symbols-outlined">local_library</span>
-                  Toggle the <strong>Wiki</strong> icon (right of <strong>(+)</strong>) to start.
-                </p>
-                <p v-else class="chat-welcome-card__hint chat-welcome-card__hint--muted">
-                  <span class="material-symbols-outlined">lock</span>
-                  Initialize the Wiki first (see the Wiki screen).
-                </p>
-              </div>
-
-              <!-- Citation Finder -->
-              <div class="chat-welcome-card">
-                <div class="chat-welcome-card__icon chat-welcome-card__icon--teal">
-                  <span class="material-symbols-outlined">quick_reference_all</span>
-                </div>
-                <h3 class="chat-welcome-card__title">Citation Finder</h3>
-                <p class="chat-welcome-card__desc">
-                  Paste text you are writing and get matching citations from your library. Bango
-                  finds the relevant passages first, so the AI cannot invent sources: every result
-                  is grounded in your real articles.
-                </p>
-                <!-- The hint branches on `citationToggleState` (the same computed
-                     that drives the toggle button), NOT the legacy
-                     `citationFinderReady` boolean. The disabled branch surfaces
-                     the "switch provider" message + a Settings link so the user
-                     on a known-unsupported provider (Anthropic, Z.AI) sees an
-                     actionable warning instead of a misleading "click to start"
-                     or a silent lock icon. -->
-                <p
-                  v-if="citationToggleState === 'enabled' || citationToggleState === 'unknown'"
-                  class="chat-welcome-card__hint"
-                >
-                  <span class="material-symbols-outlined">quick_reference_all</span>
-                  Click the <strong>Citation Finder</strong> icon to start.
-                </p>
-                <p
-                  v-else-if="citationToggleState === 'disabled'"
-                  class="chat-welcome-card__hint chat-welcome-card__hint--warning"
-                >
-                  <span class="material-symbols-outlined">block</span>
-                  Your provider does not support embeddings. Switch to OpenAI, Google or a local
-                  provider (Ollama, LM Studio) in Settings to use Citation Finder.
-                </p>
-                <p v-else class="chat-welcome-card__hint chat-welcome-card__hint--muted">
-                  <span class="material-symbols-outlined">lock</span>
-                  Requires an embedding-capable LLM provider (see Settings).
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <template v-else>
-            <div
-              v-for="(msg, idx) in chatStore.messages"
-              :key="idx"
-              :data-msg-idx="idx"
-              class="flex flex-col max-w-[80%]"
-              :class="
-                msg.role === 'user'
-                  ? 'self-end items-end animate-slide-in-up'
-                  : 'self-start items-start animate-slide-in-left'
-              "
-            >
-              <!-- Sender details -->
-              <span
-                class="text-[11px] text-slate-400 mb-1 font-medium px-1 flex items-center gap-1"
-              >
-                {{ msg.role === 'user' ? 'You' : 'Assistant' }} &bull; {{ msg.timestamp }}
-                <span
-                  v-if="msg.source === 'wiki'"
-                  class="wiki-badge"
-                  title="Answer grounded by FTS5 search over your wiki pages"
-                  >wiki</span
-                >
-                <span
-                  v-else-if="msg.source === 'citation-finder'"
-                  class="citation-badge"
-                  title="Citation Finder result"
-                  >citation</span
-                >
-              </span>
-              <!-- Bubble -->
-              <div
-                class="px-4 py-3 rounded-2xl text-sm leading-relaxed"
-                :class="
-                  msg.role === 'user'
-                    ? 'bg-indigo-600 text-white rounded-tr-none shadow-sm shadow-indigo-200'
-                    : 'bg-white text-slate-800 border border-slate-200 rounded-tl-none shadow-sm markdown-body'
-                "
-              >
-                <template v-if="msg.role === 'user'">
-                  <div style="white-space: pre-wrap">{{ msg.content }}</div>
-                </template>
-                <!-- Citation Finder results: render the card stack instead of
-                     the Markdown body. Per-bubble style frozen at submit time;
-                     IEEE [N] numbering is the flattened card order across the
-                     whole bubble (per-statement groups render claim headings). -->
-                <template v-else-if="msg.citations">
-                  <div class="citation-bubble">
-                    <p v-if="msg.content" class="citation-bubble__summary">{{ msg.content }}</p>
-                    <template v-if="msg.citations.some((g) => g.claim !== null)">
-                      <!-- Per-statement: group cards under claim headings.
-                           The predicate is "any group carries a non-null
-                           claim", NOT `length > 1`: per-statement mode that
-                           produces exactly 1 claim still has `claim: Some`,
-                           and the claim heading must render (whole-block
-                           always has `claim: null`). -->
-                      <div
-                        v-for="group in msg.citations"
-                        :key="group.claim ?? 'whole'"
-                        class="citation-bubble__group"
-                      >
-                        <button
-                          v-if="group.claim"
-                          type="button"
-                          class="citation-bubble__claim-toggle"
-                          :aria-expanded="!isClaimCollapsed(idx, group.claim)"
-                          :title="
-                            isClaimCollapsed(idx, group.claim)
-                              ? 'Expand citations for this statement'
-                              : 'Collapse citations for this statement'
-                          "
-                          @click="toggleClaimCollapsed(idx, group.claim)"
-                        >
-                          <span
-                            class="citation-bubble__claim-count"
-                            :title="
-                              claimCardCount(msg.citations, group.claim) +
-                              ' citation' +
-                              (claimCardCount(msg.citations, group.claim) === 1 ? '' : 's')
-                            "
-                            >{{ claimCardCount(msg.citations, group.claim) }}</span
-                          >
-                          <span class="citation-bubble__claim-text">{{ group.claim }}</span>
-                          <span
-                            class="material-symbols-outlined citation-bubble__claim-caret"
-                            :class="{
-                              'citation-bubble__claim-caret--collapsed': isClaimCollapsed(
-                                idx,
-                                group.claim
-                              ),
-                            }"
-                            >expand_more</span
-                          >
-                        </button>
-                        <CitationResultCard
-                          v-for="card in flattenForIeee(msg.citations).filter(
-                            (c) => c.claim === group.claim
-                          )"
-                          v-show="group.claim ? !isClaimCollapsed(idx, group.claim) : true"
-                          :key="card.match.articleId + '-' + card.ieeeIndex"
-                          :match="card.match"
-                          :style="msg.citationStyle ?? 'APA'"
-                          :ieee-index="card.ieeeIndex"
-                          @copy="handleCopyCitation"
-                          @view="openArticleDetail"
-                        />
-                      </div>
-                    </template>
-                    <template v-else>
-                      <!-- Whole-block: flat card list (every group has
-                           `claim: null`). -->
-                      <CitationResultCard
-                        v-for="card in flattenForIeee(msg.citations)"
-                        :key="card.match.articleId + '-' + card.ieeeIndex"
-                        :match="card.match"
-                        :style="msg.citationStyle ?? 'APA'"
-                        :ieee-index="card.ieeeIndex"
-                        @copy="handleCopyCitation"
-                        @view="openArticleDetail"
-                      />
-                    </template>
-                  </div>
-                </template>
-                <template v-else>
-                  <div @click="handleBubbleClick">
-                    <!-- eslint-disable-next-line vue/no-v-html -- trusted LLM output; wiki links sanitized to data attributes -->
-                    <div class="markdown-content" v-html="renderMessage(msg)" />
-                  </div>
-                </template>
-              </div>
-            </div>
-          </template>
-
-          <!-- Loading / Thinking indicator.
-               HIDDEN in citation-finder mode: the citation-progress bar above
-               the input area already communicates Phase B/C status (with a
-               Cancel button + per-phase message), so the generic "Analyzing
-               article context..." text would be stale, misleading, and
-               redundant. Wiki + article modes keep the thinking dots. -->
-          <div
-            v-if="chatStore.loading && !isCitationMode"
-            class="flex flex-col items-start max-w-[80%] self-start animate-pulse"
-          >
-            <span class="text-[11px] text-slate-400 mb-1 font-medium px-1 flex items-center gap-1">
-              Assistant &bull; Thinking
-              <span v-if="chatStore.source === 'wiki'" class="wiki-badge">wiki</span>
-            </span>
-            <div
-              class="px-4 py-3 rounded-2xl bg-white text-slate-500 border border-slate-200 rounded-tl-none shadow-sm flex items-center gap-2"
-            >
-              <div class="flex gap-1">
-                <span class="dot-1 w-1.5 h-1.5 bg-indigo-600 rounded-full"></span>
-                <span class="dot-2 w-1.5 h-1.5 bg-indigo-600 rounded-full"></span>
-                <span class="dot-3 w-1.5 h-1.5 bg-indigo-600 rounded-full"></span>
-              </div>
-              <span class="text-xs">{{
-                chatStore.source === 'wiki'
-                  ? 'Searching wiki pages...'
-                  : 'Analyzing article context...'
-              }}</span>
-            </div>
-          </div>
+          <!-- Transcript: message bubbles + citation stacks + thinking dots.
+               The scroll-anchor querySelector targets [data-msg-idx] inside
+               this container, which still reaches the child component's DOM. -->
+          <ChatMessageList
+            v-else
+            :messages="chatStore.messages"
+            :wiki-sources="wikiSources"
+            :wiki-page-titles="wikiPageTitles"
+            :loading="chatStore.loading"
+            :source="chatStore.source"
+            :citation-mode="isCitationMode"
+            @copy="handleCopyCitation"
+            @open-wiki="openWikiPage"
+            @open-article="openArticleDetail"
+          />
         </div>
 
         <!-- Context pills and Input area -->
@@ -1029,276 +322,42 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
           </div>
 
           <!-- Citation Finder input area (replaces article-context pills +
-               single-line input). Holds the style <select>, mode toggle,
-               status checkboxes, prose textarea, Find Citations button, and
-               the live progress + Cancel UI. -->
-          <div v-else-if="isCitationMode" class="citation-input-area">
-            <!-- Disabled-provider banner: shown when the user managed to enter
-                 citation mode (e.g. the toggle was clickable when they
-                 clicked it, then the provider was changed in Settings to an
-                 unsupported one) but the current provider does not support
-                 embeddings. Mirrors the wiki-banner pattern. -->
-            <div v-if="citationToggleState === 'disabled'" class="citation-disabled-banner">
-              <span class="material-symbols-outlined text-[16px]">block</span>
-              <span class="citation-disabled-banner__text">
-                Current provider does not support Citation Finder embeddings. Switch to an
-                embedding-capable provider in Settings.
-              </span>
-              <button
-                class="citation-disabled-banner__btn"
-                title="Open Settings"
-                @click="router.push('/settings')"
-              >
-                Open Settings
-              </button>
-            </div>
-
-            <!-- Coverage / first-run notice (Deliverable 3): surfaces the
-                 readiness payload's coverage so the user knows whether the
-                 first search will trigger a one-time embedding-generation
-                 pass (Phase B) and how many articles are in scope. Hidden
-                 when there are no articles in the selected statuses (the
-                 empty-search path handles that case) or when coverage is
-                 already complete. -->
-            <div
-              v-if="
-                chatStore.citationReadiness &&
-                chatStore.citationReadiness.totalArticles > 0 &&
-                chatStore.citationReadiness.coveragePct < 100 &&
-                !chatStore.citationProgress
-              "
-              class="citation-coverage-notice"
-            >
-              <span class="material-symbols-outlined text-[14px]">database</span>
-              <span>
-                First run will prepare embeddings for
-                {{ chatStore.citationReadiness.totalArticles }} article(s) - this may take several
-                minutes. Subsequent searches are fast.
-              </span>
-            </div>
-
-            <!-- Single control row: Citation Style dropdown → status
-                 checkboxes → Mode segmented toggle → close (X). Everything is
-                 at the same level so there's no extra whitespace; the close
-                 button is pushed to the right edge with margin-left:auto. -->
-            <div class="citation-input-area__row">
-              <label class="citation-input-area__field">
-                <span class="citation-input-area__label">Citation Style</span>
-                <select
-                  :value="chatStore.citationStyle"
-                  class="citation-input-area__select"
-                  @change="
-                    chatStore.setCitationStyle(
-                      ($event.target as HTMLSelectElement).value as CitationStyle
-                    )
-                  "
-                >
-                  <option v-for="s in citationStyleOptions" :key="s" :value="s">{{ s }}</option>
-                </select>
-              </label>
-
-              <!-- Status checkboxes with a "ARTICLES TO SEARCH" header matching
-                   the Citation Style header. Duplicate is always excluded. -->
-              <div class="citation-input-area__field" role="group" aria-label="Status filter">
-                <span class="citation-input-area__label">Articles to Search</span>
-                <div class="citation-input-area__statuses">
-                  <label class="citation-input-area__checkbox">
-                    <input v-model="citationStatuses.working" type="checkbox" />
-                    <span>Working</span>
-                  </label>
-                  <label class="citation-input-area__checkbox">
-                    <input v-model="citationStatuses.included" type="checkbox" />
-                    <span>Included</span>
-                  </label>
-                  <label class="citation-input-area__checkbox">
-                    <input v-model="citationStatuses.rejected" type="checkbox" />
-                    <span>Rejected</span>
-                  </label>
-                </div>
-                <span class="citation-input-area__statuses-hint">Duplicates always excluded</span>
-              </div>
-
-              <!-- Mode toggle with a "SCOPE" header matching Citation Style. -->
-              <div
-                class="citation-input-area__field"
-                role="group"
-                aria-label="Citation Finder mode"
-              >
-                <span class="citation-input-area__label">Scope</span>
-                <div class="citation-input-area__mode">
-                  <button
-                    type="button"
-                    class="citation-input-area__mode-btn"
-                    :class="{
-                      'citation-input-area__mode-btn--active':
-                        chatStore.citationFinderMode === 'whole_block',
-                    }"
-                    @click="onSetCitationMode('whole_block')"
-                  >
-                    Whole Block
-                  </button>
-                  <button
-                    type="button"
-                    class="citation-input-area__mode-btn"
-                    :class="{
-                      'citation-input-area__mode-btn--active':
-                        chatStore.citationFinderMode === 'per_statement',
-                    }"
-                    @click="onSetCitationMode('per_statement')"
-                  >
-                    Per Statement
-                  </button>
-                </div>
-              </div>
-              <button
-                type="button"
-                class="citation-input-area__close"
-                title="Close Citation Finder"
-                @click="onToggleCitationFinder"
-              >
-                <span class="material-symbols-outlined text-[18px]">close</span>
-              </button>
-            </div>
-
-            <!-- Row 3: Prose textarea + (Find Citations button OR live
-                 progress). While a search is running, the progress indicator
-                 replaces the Find Citations button in place - the textarea
-                 stays visible so the user can draft the next search. -->
-            <div class="citation-input-area__prose-row">
-              <textarea
-                v-model="chatStore.citationDraft"
-                class="citation-input-area__textarea"
-                placeholder="Paste the text you want to find citations for..."
-                rows="4"
-                @keydown.enter.ctrl="handleCitationSend"
-                @keydown.enter.meta="handleCitationSend"
-              ></textarea>
-
-              <!-- Idle: Find Citations button -->
-              <button
-                v-if="!chatStore.citationProgress"
-                type="button"
-                class="citation-input-area__find-btn"
-                :disabled="!chatStore.citationDraft.trim() || chatStore.loading"
-                @click="handleCitationSend"
-              >
-                <span class="material-symbols-outlined text-[18px]">search</span>
-                Find Citations
-              </button>
-
-              <!-- Running: compact progress replaces the button -->
-              <div v-else class="citation-progress citation-progress--inline">
-                <div class="citation-progress__header">
-                  <span class="citation-progress__message">{{
-                    chatStore.citationProgress.message
-                  }}</span>
-                  <button
-                    type="button"
-                    class="citation-progress__cancel"
-                    :disabled="chatStore.cancelling"
-                    @click="chatStore.cancelCitationSearch()"
-                  >
-                    <span
-                      v-if="chatStore.cancelling"
-                      class="citation-progress__cancel-spinner"
-                    ></span>
-                    <span v-else class="material-symbols-outlined text-[14px]">cancel</span>
-                    {{ chatStore.cancelling ? 'Cancelling…' : 'Cancel' }}
-                  </button>
-                </div>
-                <div class="citation-progress__bar-track">
-                  <div
-                    class="citation-progress__bar-fill"
-                    :style="{
-                      width:
-                        (chatStore.citationProgress.phase === 'preparing_embeddings'
-                          ? chatStore.citationProgress.overallPercent
-                          : 100) + '%',
-                    }"
-                    :class="{
-                      'citation-progress__bar-fill--indeterminate':
-                        chatStore.citationProgress.phase === 'searching',
-                    }"
-                  ></div>
-                </div>
-              </div>
-            </div>
-          </div>
+               single-line input). -->
+          <CitationInputArea
+            v-else-if="isCitationMode"
+            :readiness="chatStore.citationReadiness"
+            :toggle-state="citationToggleState"
+            :style-value="chatStore.citationStyle"
+            :mode="chatStore.citationFinderMode"
+            :statuses="citationStatuses"
+            :draft="chatStore.citationDraft"
+            :progress="chatStore.citationProgress"
+            :loading="chatStore.loading"
+            :cancelling="chatStore.cancelling"
+            @update:style="chatStore.setCitationStyle"
+            @update:mode="onSetCitationMode"
+            @update:statuses="onStatusesChange"
+            @update:draft="chatStore.citationDraft = $event"
+            @send="handleCitationSend"
+            @cancel="chatStore.cancelCitationSearch()"
+            @close="onToggleCitationFinder"
+            @open-settings="router.push('/settings')"
+          />
 
           <!-- Selected articles panel (article mode only) -->
-          <div v-else class="mb-3">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                Selected Context ({{ selectedArticles.length }})
-              </span>
-              <button
-                v-if="selectedArticles.length > 0"
-                class="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold"
-                @click="chatStore.clearSelectedArticles()"
-              >
-                Clear Context
-              </button>
-            </div>
-
-            <!-- Horizontal scrolling pills -->
-            <div class="flex flex-wrap gap-2 max-h-32 overflow-y-auto py-1">
-              <div
-                v-for="art in selectedArticles"
-                :key="art.id"
-                class="relative flex items-center rounded-full bg-slate-100 border border-slate-200 text-xs text-slate-700 hover:bg-slate-200 transition-colors"
-              >
-                <!-- Info text area with help cursor and hover tooltip trigger -->
-                <div
-                  class="flex items-center gap-1.5 pl-3 py-1.5 pr-2 cursor-help rounded-l-full"
-                  @mouseenter="handleMouseEnter($event, art)"
-                  @mouseleave="handleMouseLeave"
-                >
-                  <span class="font-semibold text-slate-800">{{ getAuthorText(art) }}</span>
-                  <span class="text-slate-500">({{ art.publicationYear ?? 'N/A' }})</span>
-                  <span class="text-slate-400">-</span>
-                  <span class="truncate max-w-[120px]">{{ getTitleText(art) }}</span>
-                </div>
-
-                <!-- Control actions area (does NOT trigger hover tooltip, has pointer cursor) -->
-                <div
-                  class="flex items-center gap-1.5 pr-3 py-1 border-l border-slate-200/60 pl-2 rounded-r-full"
-                >
-                  <!-- Open In New details action -->
-                  <button
-                    class="flex items-center justify-center w-5 h-5 rounded-full hover:bg-slate-300 text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer"
-                    title="Open article details"
-                    @click="openArticleDetail(art.id)"
-                  >
-                    <span class="material-symbols-outlined text-[14px]">open_in_new</span>
-                  </button>
-
-                  <!-- Close button -->
-                  <button
-                    class="flex items-center justify-center w-5 h-5 rounded-full hover:bg-slate-300 text-slate-500 hover:text-rose-600 transition-colors cursor-pointer"
-                    title="Remove from context"
-                    @click="
-                      chatStore.removeSelectedArticle(art.id);
-                      handleMouseLeave();
-                    "
-                  >
-                    <span class="material-symbols-outlined text-[14px]">close</span>
-                  </button>
-                </div>
-              </div>
-
-              <p v-if="selectedArticles.length === 0" class="text-xs text-slate-400 italic py-1">
-                No articles added. Click (+) to select articles from your library to include in this
-                query.
-              </p>
-            </div>
-          </div>
+          <SelectedArticlesBar
+            v-else
+            :articles="selectedArticles"
+            @open-detail="openArticleDetail"
+            @remove="chatStore.removeSelectedArticle"
+            @clear="chatStore.clearSelectedArticles"
+          />
 
           <!-- Chat bar input container.
                HIDDEN in citation-finder mode: the citation input area above
                owns the active input (prose textarea + Find/progress), and the
-               mode toggles here are redundant (the citation area has its own
-               close button + the toggle is not how the user exits). Wiki +
-               article modes keep the full chat bar. -->
+               mode toggles here are redundant. Wiki + article modes keep the
+               full chat bar. -->
           <div v-if="!isCitationMode" class="flex items-center gap-3">
             <!-- Plus button (article mode only; hidden in wiki mode) -->
             <button
@@ -1310,7 +369,7 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
               <span class="material-symbols-outlined text-[24px]">add</span>
             </button>
 
-            <!-- Wiki toggle button. Always adjacent to (+) when visible. Halo + indigo fill when active. -->
+            <!-- Wiki toggle button. Halo + indigo fill when active. -->
             <button
               v-if="chatStore.wikiReady"
               class="wiki-toggle"
@@ -1326,14 +385,9 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
               <span class="material-symbols-outlined text-[24px]">local_library</span>
             </button>
 
-            <!-- Citation Finder toggle button (3rd toggle). Renders in a
-                 visible-but-disabled state when the provider is known to not
-                 support embeddings (Anthropic, Z.AI) so the user can see the
-                 feature exists + learn they need to switch providers, rather
-                 than the toggle silently disappearing. Clickable when
-                 `citationToggleState` is `'enabled'` or `'unknown'` (Phase B
-                 probes on first run). Hidden only when readiness has not
-                 loaded yet OR the LLM is not configured. -->
+            <!-- Citation Finder toggle button (3rd toggle). Visible-but-
+                 disabled on known-unsupported providers; hidden only when
+                 readiness has not loaded OR the LLM is not configured. -->
             <button
               v-if="citationToggleState !== 'hidden'"
               class="citation-toggle"
@@ -1376,7 +430,6 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
         </div>
       </div>
     </div>
-    <!-- Left Workspace: Chat Interface -->
 
     <!-- Right Workspace: Article Details Side Panel -->
     <Transition name="slide">
@@ -1435,259 +488,45 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
       </div>
     </Transition>
 
-    <!-- Citation Finder embedding model-mismatch dialog. Pops before a search
-         when stored embeddings were generated with a different model than the
-         current `embedding_model` setting (so recall would silently return
-         zero hits). Three options: Regenerate (delete all + re-embed),
-         Continue (proceed with partial recall), Cancel (abort). -->
-    <Teleport to="body">
-      <Transition name="fade">
-        <div
-          v-if="mismatchDialog"
-          class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-          @click.self="cancelMismatchDialog"
-        >
-          <div
-            class="mismatch-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="mismatch-title"
-          >
-            <div class="mismatch-dialog__icon">
-              <span class="material-symbols-outlined">sync_problem</span>
-            </div>
-            <h3 id="mismatch-title" class="mismatch-dialog__title">
-              Embeddings were generated with a different model
-            </h3>
-            <p class="mismatch-dialog__body">
-              Your stored embeddings were generated with
-              <code>{{ mismatchDialog.storedModel }}</code> but the current embedding model is
-              <code>{{ mismatchDialog.currentModel || '(unknown)' }}</code
-              >. For consistent results, regenerate your embeddings ({{
-                mismatchDialog.storedRowCount
-              }}
-              row(s) will be re-embedded). Otherwise Citation Finder may silently return zero
-              matches.
-            </p>
-            <div class="mismatch-dialog__actions">
-              <button
-                type="button"
-                class="mismatch-dialog__btn mismatch-dialog__btn--ghost"
-                :disabled="regenerating"
-                @click="cancelMismatchDialog"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                class="mismatch-dialog__btn mismatch-dialog__btn--secondary"
-                :disabled="regenerating"
-                @click="continueMismatchSearch"
-              >
-                Continue anyway
-              </button>
-              <button
-                type="button"
-                class="mismatch-dialog__btn mismatch-dialog__btn--primary"
-                :disabled="regenerating"
-                @click="confirmMismatchRegenerate"
-              >
-                <span
-                  v-if="regenerating"
-                  class="mismatch-dialog__spinner"
-                  aria-label="Regenerating"
-                ></span>
-                <span v-else class="material-symbols-outlined text-[16px]">refresh</span>
-                {{ regenerating ? 'Starting…' : 'Regenerate' }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    <!-- Citation Finder embedding model-mismatch dialog. -->
+    <CitationMismatchDialog
+      :mismatch="mismatchDialog"
+      :regenerating="regenerating"
+      @regenerate="confirmMismatchRegenerate"
+      @continue="continueMismatchSearch"
+      @cancel="cancelMismatchDialog"
+    />
+
+    <!-- T7: contextual Bango Local download prompt (local backend selected
+         but components not installed: Download / Use Configured Provider /
+         Cancel). -->
+    <CitationLocalEmbeddingsDialog
+      v-if="localPromptOpen"
+      :status="localEmbeddings.status.value"
+      :progress="localEmbeddings.progress.value"
+      :installing="localEmbeddings.installing.value"
+      :error="localEmbeddings.error.value"
+      :chat-provider-supports-embeddings="
+        chatStore.citationReadiness?.chatProviderSupportsEmbeddings ?? false
+      "
+      @download="confirmLocalDownload"
+      @use-cloud="confirmLocalUseCloud"
+      @cancel="cancelLocalPrompt"
+    />
 
     <!-- Article Selection Modal -->
-    <Teleport to="body">
-      <div
-        v-if="showSelector"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-        @click.self="showSelector = false"
-      >
-        <div
-          class="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col border border-slate-100 overflow-hidden animate-zoom-in"
-        >
-          <!-- Modal Header -->
-          <div class="px-6 py-4 border-b border-slate-150 flex items-center justify-between">
-            <div>
-              <h3 class="text-base font-bold text-slate-900">Include Articles in Context</h3>
-              <p class="text-xs text-slate-500">
-                Search and toggle articles to provide as background knowledge
-              </p>
-            </div>
-            <button
-              class="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500 transition-colors"
-              @click="showSelector = false"
-            >
-              <span class="material-symbols-outlined text-[20px]">close</span>
-            </button>
-          </div>
-
-          <!-- Search Bar -->
-          <div class="px-6 py-3 border-b border-slate-100 bg-slate-50/50">
-            <div class="relative">
-              <span
-                class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]"
-                >search</span
-              >
-              <input
-                v-model="searchQuery"
-                type="text"
-                placeholder="Search by title, authors, or journal..."
-                class="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm bg-white"
-              />
-            </div>
-          </div>
-
-          <!-- Articles list -->
-          <div class="flex-1 overflow-y-auto p-4 divide-y divide-slate-100">
-            <div
-              v-for="art in filteredArticles"
-              :key="art.id"
-              class="flex items-center gap-4 py-3 px-2.5 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors"
-              @click="toggleArticleSelection(art.id)"
-            >
-              <!-- Checkbox -->
-              <input
-                type="checkbox"
-                class="accent-indigo-600 rounded cursor-pointer w-4 h-4 flex-shrink-0"
-                :checked="chatStore.selectedArticleIds.includes(art.id)"
-                @click.stop="toggleArticleSelection(art.id)"
-              />
-
-              <!-- Info -->
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-semibold text-slate-900 truncate mb-0.5">
-                  {{ art.title }}
-                </p>
-                <div class="flex items-center gap-2 text-xs text-slate-500">
-                  <span class="font-medium text-slate-600">{{
-                    formatAuthorsList(art.authors)
-                  }}</span>
-                  <span class="text-slate-300">&bull;</span>
-                  <span>{{ art.publicationYear ?? 'N/A' }}</span>
-                  <span v-if="art.journal" class="text-slate-300">&bull;</span>
-                  <span v-if="art.journal" class="italic truncate max-w-[150px]">{{
-                    art.journal
-                  }}</span>
-                </div>
-              </div>
-
-              <!-- Status badge -->
-              <div
-                class="px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider"
-                :class="{
-                  'bg-emerald-50 text-emerald-700': art.status === 'included',
-                  'bg-indigo-50 text-indigo-700': art.status === 'working',
-                  'bg-red-50 text-red-700': art.status === 'rejected',
-                }"
-              >
-                {{ art.status }}
-              </div>
-            </div>
-
-            <!-- Empty Selector State -->
-            <div
-              v-if="filteredArticles.length === 0"
-              class="text-center py-12 text-slate-400 text-sm"
-            >
-              No matching articles found in your library.
-            </div>
-          </div>
-
-          <!-- Footer -->
-          <div
-            class="px-6 py-4 border-t border-slate-100 bg-slate-50/50 flex justify-between items-center text-xs"
-          >
-            <span class="text-slate-500">
-              {{ chatStore.selectedArticleIds.length }} article(s) selected
-            </span>
-            <button
-              class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold shadow-sm transition-colors text-xs"
-              @click="showSelector = false"
-            >
-              Done
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- Floating Tooltip for pills -->
-    <Teleport to="body">
-      <Transition name="tooltip-fade">
-        <div
-          v-if="hoveredArticle"
-          class="fixed z-50 w-80 p-3 rounded-xl bg-slate-900 text-white text-[11px] leading-normal shadow-xl border border-slate-800 flex flex-col gap-1 pointer-events-none text-left"
-          :style="{
-            left: tooltipX + 'px',
-            top: tooltipY + 'px',
-            transform: 'translate(-50%, -108%)',
-          }"
-        >
-          <div class="font-bold text-slate-400">Title</div>
-          <div class="font-medium text-white break-words">{{ hoveredArticle.title }}</div>
-          <div class="font-bold text-slate-400 mt-1">Authors</div>
-          <div class="text-slate-300 break-words">
-            {{ formatAuthorsList(hoveredArticle.authors) }}
-          </div>
-          <!-- Tooltip arrow -->
-          <div
-            class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"
-          ></div>
-        </div>
-      </Transition>
-    </Teleport>
+    <ArticleSelectorModal
+      :open="showSelector"
+      :articles="articles"
+      :selected-ids="chatStore.selectedArticleIds"
+      @toggle="toggleArticleSelection"
+      @close="showSelector = false"
+      @done="showSelector = false"
+    />
   </div>
 </template>
 
 <style scoped>
-/* User bubbles float in from the bottom (rising from the input area where the
- * message was sent / Find Citations was clicked) - the natural chat idiom.
- * The former horizontal slide-in-right was imperceptible next to the
- * submit-time scroll-to-bottom and read as an abrupt appearance. */
-@keyframes slide-in-up {
-  from {
-    transform: translateY(18px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-@keyframes slide-in-left {
-  from {
-    transform: translateX(-12px);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-@keyframes zoom-in {
-  from {
-    transform: scale(0.95);
-    opacity: 0;
-  }
-  to {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
 @keyframes fade-in {
   from {
     opacity: 0;
@@ -1697,142 +536,8 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
   }
 }
 
-.animate-slide-in-up {
-  animation: slide-in-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.animate-slide-in-left {
-  animation: slide-in-left 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.animate-zoom-in {
-  animation: zoom-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
 .animate-fade-in {
   animation: fade-in 0.3s ease-out forwards;
-}
-
-/* Three-column welcome grid (Academic Chat / Wiki Chat / Citation Finder).
-   Responsive: 3 columns on md+, single column on small screens. */
-.chat-welcome-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1rem;
-}
-
-@media (min-width: 768px) {
-  .chat-welcome-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-.chat-welcome-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  background: #fff;
-  border: 1px solid rgb(226 232 240); /* slate-200 */
-  border-radius: 0.75rem;
-  padding: 1.25rem;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
-}
-
-.chat-welcome-card__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 9999px;
-  margin-bottom: 0.25rem;
-}
-
-.chat-welcome-card__icon span.material-symbols-outlined {
-  font-size: 26px;
-}
-
-.chat-welcome-card__icon--indigo {
-  background: rgb(238 242 255); /* indigo-50 */
-  color: rgb(79 70 229); /* indigo-600 */
-}
-
-.chat-welcome-card__icon--purple {
-  background: rgb(250 232 255); /* purple-50 */
-  color: rgb(126 34 206); /* purple-700 */
-}
-
-.chat-welcome-card__icon--teal {
-  background: rgb(204 251 241); /* teal-100 */
-  color: rgb(15 118 110); /* teal-700 */
-}
-
-.chat-welcome-card__title {
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: rgb(15 23 42); /* slate-900 */
-  margin: 0;
-}
-
-.chat-welcome-card__desc {
-  font-size: 0.8rem;
-  line-height: 1.5;
-  color: rgb(71 85 105); /* slate-600 */
-  margin: 0;
-}
-
-.chat-welcome-card__hint {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.375rem;
-  margin-top: auto;
-  padding-top: 0.5rem;
-  font-size: 0.72rem;
-  color: rgb(99 102 241); /* indigo-600 */
-  font-weight: 600;
-}
-
-.chat-welcome-card__hint span.material-symbols-outlined {
-  font-size: 15px;
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-
-.chat-welcome-card__hint--muted {
-  color: rgb(148 163 184); /* slate-400 */
-  font-weight: 500;
-}
-
-/* Warning variant: known-unsupported provider (Anthropic, Z.AI). Amber
-   chrome so it reads as an actionable "switch provider" warning instead of
-   the muted "not available" lock. Matches the citation-disabled-banner
-   palette. */
-.chat-welcome-card__hint--warning {
-  color: rgb(180 83 9); /* amber-700 */
-  font-weight: 600;
-}
-
-.dot-1,
-.dot-2,
-.dot-3 {
-  animation: bounce 1.4s infinite ease-in-out both;
-}
-.dot-1 {
-  animation-delay: -0.32s;
-}
-.dot-2 {
-  animation-delay: -0.16s;
-}
-
-@keyframes bounce {
-  0%,
-  80%,
-  100% {
-    transform: scale(0);
-  }
-  40% {
-    transform: scale(1);
-  }
 }
 
 /* Wiki mode toggle button (right of the (+) icon). Halo + indigo fill when active. */
@@ -1868,35 +573,6 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
   box-shadow:
     0 0 0 3px rgb(199 210 254 / 0.9),
     /* indigo-200 ring */ 0 1px 2px rgb(15 23 42 / 0.08);
-}
-
-/* Small "wiki" badge on message timestamps. */
-.wiki-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.0625rem 0.375rem;
-  border-radius: 9999px;
-  background-color: rgb(224 231 255); /* indigo-100 */
-  color: rgb(67 56 202); /* indigo-800 */
-  font-size: 0.55rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-/* Small "citation" badge on citation-finder assistant bubble timestamps.
-   Mirrors .wiki-badge but in teal so the two sources are visually distinct. */
-.citation-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.0625rem 0.375rem;
-  border-radius: 9999px;
-  background-color: rgb(204 251 241); /* teal-100 */
-  color: rgb(15 118 110); /* teal-800 */
-  font-size: 0.55rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 /* Citation Finder toggle button (3rd toggle, mirrors .wiki-toggle). */
@@ -1944,374 +620,6 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
   cursor: not-allowed;
   box-shadow: none;
   opacity: 0.7;
-}
-
-/* Citation Finder input area (replaces article-context pills + single-line
- * input when isCitationMode is true). */
-.citation-input-area {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
-}
-
-/* Close (X) button - exits citation mode. Sits at the same level as the
-   Citation Style dropdown (inside Row 1) and is pushed to the right edge with
-   margin-left:auto so it introduces no extra top whitespace. Mirrors the
-   wiki-reader close button's muted slate styling. Aligned to center so it
-   lines up with the row's other controls regardless of label height. */
-.citation-input-area__close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  margin-left: auto;
-  align-self: center;
-  border-radius: 0.375rem;
-  border: none;
-  background: transparent;
-  color: rgb(100 116 139); /* slate-500 */
-  cursor: pointer;
-  transition:
-    background-color 0.15s,
-    color 0.15s;
-}
-
-.citation-input-area__close:hover {
-  background-color: rgb(241 245 249); /* slate-100 */
-  color: rgb(15 23 42); /* slate-900 */
-}
-
-/* Inline variant of the progress block: constrains the width so it occupies
-   the Find Citations button's column (instead of spanning the full row). */
-.citation-progress--inline {
-  flex-shrink: 0;
-  min-width: 9rem;
-  max-width: 12rem;
-  justify-content: center;
-}
-
-.citation-input-area__row {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.citation-input-area__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1875rem;
-}
-
-.citation-input-area__label {
-  font-size: 0.625rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: rgb(100 116 139); /* slate-500 */
-}
-
-.citation-input-area__select {
-  padding: 0.3125rem 0.5rem;
-  border: 1px solid rgb(203 213 225); /* slate-300 */
-  border-radius: 0.375rem;
-  background: #fff;
-  font-size: 0.75rem;
-  color: rgb(15 23 42); /* slate-900 */
-  cursor: pointer;
-}
-
-.citation-input-area__mode {
-  display: inline-flex;
-  border: 1px solid rgb(203 213 225);
-  border-radius: 0.375rem;
-  overflow: hidden;
-}
-
-.citation-input-area__mode-btn {
-  padding: 0.3125rem 0.625rem;
-  border: none;
-  background: #fff;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  color: rgb(71 85 105); /* slate-600 */
-  cursor: pointer;
-  transition:
-    background-color 0.15s,
-    color 0.15s;
-}
-
-.citation-input-area__mode-btn:not(.citation-input-area__mode-btn--active):hover {
-  background: rgb(241 245 249); /* slate-100 */
-}
-
-.citation-input-area__mode-btn--active {
-  background: rgb(99 102 241); /* indigo-600 */
-  color: #fff;
-}
-
-.citation-input-area__statuses {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.625rem;
-}
-
-.citation-input-area__checkbox {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.6875rem;
-  color: rgb(71 85 105); /* slate-600 */
-  cursor: pointer;
-}
-
-.citation-input-area__checkbox input {
-  accent-color: rgb(99 102 241); /* indigo-600 */
-}
-
-.citation-input-area__statuses-hint {
-  font-size: 0.625rem;
-  color: rgb(148 163 184); /* slate-400 */
-  font-style: italic;
-}
-
-.citation-input-area__prose-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: stretch;
-}
-
-.citation-input-area__textarea {
-  flex: 1;
-  padding: 0.5rem 0.625rem;
-  border: 1px solid rgb(203 213 225); /* slate-300 */
-  border-radius: 0.5rem;
-  font-size: 0.8rem;
-  line-height: 1.4;
-  color: rgb(15 23 42);
-  resize: vertical;
-  min-height: 4.5rem;
-  font-family: inherit;
-}
-
-.citation-input-area__textarea:focus {
-  outline: none;
-  border-color: rgb(99 102 241); /* indigo-600 */
-  box-shadow: 0 0 0 2px rgb(99 102 241 / 0.2);
-}
-
-.citation-input-area__find-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.5rem 0.875rem;
-  border: none;
-  border-radius: 0.5rem;
-  background: rgb(99 102 241); /* indigo-600 */
-  color: #fff;
-  font-size: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 0.15s;
-  flex-shrink: 0;
-}
-
-.citation-input-area__find-btn:hover:not(:disabled) {
-  background: rgb(79 70 229); /* indigo-700 */
-}
-
-.citation-input-area__find-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* Live progress bar + Cancel button. */
-.citation-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3125rem;
-  padding: 0.5rem 0.625rem;
-  background: rgb(248 250 252); /* slate-50 */
-  border: 1px solid rgb(226 232 240); /* slate-200 */
-  border-radius: 0.375rem;
-}
-
-.citation-progress__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.citation-progress__message {
-  font-size: 0.6875rem;
-  font-weight: 500;
-  color: rgb(71 85 105); /* slate-600 */
-}
-
-.citation-progress__cancel {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.1875rem;
-  padding: 0.1875rem 0.4375rem;
-  border: 1px solid rgb(254 202 202); /* red-200 */
-  border-radius: 0.25rem;
-  background: #fff;
-  color: rgb(220 38 38); /* red-600 */
-  font-size: 0.625rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 0.15s;
-}
-
-.citation-progress__cancel:hover:not(:disabled) {
-  background: rgb(254 226 226); /* red-100 */
-}
-
-.citation-progress__cancel:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-/* Small spinner shown next to "Cancelling…" while the backend drains the
- * in-flight LLM call + emits the terminal `citation:error`. */
-.citation-progress__cancel-spinner {
-  display: inline-block;
-  width: 0.75rem;
-  height: 0.75rem;
-  border: 1.5px solid rgb(220 38 38 / 0.3); /* red-600 @ 30% */
-  border-top-color: rgb(220 38 38); /* red-600 */
-  border-radius: 9999px;
-  animation: citation-cancel-spin 0.7s linear infinite;
-}
-
-@keyframes citation-cancel-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.citation-progress__bar-track {
-  width: 100%;
-  height: 0.25rem;
-  background: rgb(226 232 240); /* slate-200 */
-  border-radius: 9999px;
-  overflow: hidden;
-}
-
-.citation-progress__bar-fill {
-  height: 100%;
-  background: rgb(99 102 241); /* indigo-600 */
-  border-radius: 9999px;
-  transition: width 0.2s ease;
-}
-
-.citation-progress__bar-fill--indeterminate {
-  animation: citation-progress-indeterminate 1.4s ease-in-out infinite;
-}
-
-@keyframes citation-progress-indeterminate {
-  0% {
-    transform: translateX(-100%);
-  }
-  50% {
-    transform: translateX(0%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-/* Citation results bubble: stacks CitationResultCard components. */
-.citation-bubble {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  width: 100%;
-  min-width: 0;
-}
-
-.citation-bubble__summary {
-  font-size: 0.75rem;
-  color: rgb(100 116 139); /* slate-500 */
-  margin: 0 0 0.25rem 0;
-}
-
-.citation-bubble__group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-
-.citation-bubble__claim-heading {
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: rgb(67 56 202); /* indigo-800 */
-  background: rgb(238 242 255); /* indigo-50 */
-  padding: 0.1875rem 0.375rem;
-  border-radius: 0.25rem;
-  margin: 0.25rem 0 0 0;
-}
-
-/* Per-statement claim-group collapse toggle (replaces the static <h4>). */
-.citation-bubble__claim-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  width: 100%;
-  text-align: left;
-  border: none;
-  border-radius: 0.25rem;
-  background: rgb(238 242 255); /* indigo-50 */
-  padding: 0.25rem 0.5rem;
-  cursor: pointer;
-  transition: background-color 0.15s;
-  font-family: inherit;
-}
-
-.citation-bubble__claim-toggle:hover {
-  background: rgb(224 231 255); /* indigo-100 */
-}
-
-.citation-bubble__claim-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.25rem;
-  height: 1.25rem;
-  padding: 0 0.3125rem;
-  border-radius: 9999px;
-  background: rgb(99 102 241); /* indigo-600 */
-  color: #fff;
-  font-size: 0.625rem;
-  font-weight: 700;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.citation-bubble__claim-text {
-  flex: 1;
-  min-width: 0;
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: rgb(67 56 202); /* indigo-800 */
-  /* Long claims wrap; the toggle grows vertically. */
-  word-break: break-word;
-}
-
-.citation-bubble__claim-caret {
-  font-size: 16px;
-  color: rgb(99 102 241); /* indigo-600 */
-  transition: transform 0.15s ease;
-  flex-shrink: 0;
-}
-
-/* Collapsed -> caret points right (rotated -90deg). Expanded -> points down. */
-.citation-bubble__claim-caret--collapsed {
-  transform: rotate(-90deg);
 }
 
 /* Wiki-mode banner (replaces the article context picker). */
@@ -2390,110 +698,6 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
   overflow: hidden;
 }
 
-/* Markdown styling in chat bubble */
-.markdown-content :deep(p) {
-  margin-bottom: 0.5rem;
-}
-.markdown-content :deep(p:last-child) {
-  margin-bottom: 0;
-}
-.markdown-content :deep(h1),
-.markdown-content :deep(h2),
-.markdown-content :deep(h3) {
-  font-weight: 600;
-  margin-top: 0.75rem;
-  margin-bottom: 0.375rem;
-  color: var(--color-on-surface, #0f172a);
-}
-.markdown-content :deep(h1) {
-  font-size: 1.15rem;
-}
-.markdown-content :deep(h2) {
-  font-size: 1.05rem;
-}
-.markdown-content :deep(h3) {
-  font-size: 0.95rem;
-}
-.markdown-content :deep(ul),
-.markdown-content :deep(ol) {
-  padding-left: 1.25rem;
-  margin-bottom: 0.5rem;
-}
-.markdown-content :deep(ul) {
-  list-style-type: disc;
-}
-.markdown-content :deep(ol) {
-  list-style-type: decimal;
-}
-.markdown-content :deep(li) {
-  margin-bottom: 0.25rem;
-}
-.markdown-content :deep(strong) {
-  font-weight: 600;
-}
-.markdown-content :deep(em) {
-  font-style: italic;
-}
-.markdown-content :deep(code) {
-  background-color: #f1f5f9;
-  padding: 2px 4px;
-  border-radius: 4px;
-  font-size: 0.85em;
-  font-family: monospace;
-}
-.markdown-content :deep(pre) {
-  background-color: #f1f5f9;
-  padding: 0.5rem;
-  border-radius: 6px;
-  overflow-x: auto;
-  margin: 0.5rem 0;
-}
-.markdown-content :deep(table) {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 0.5rem 0;
-  font-size: 0.85rem;
-}
-.markdown-content :deep(th),
-.markdown-content :deep(td) {
-  border: 1px solid #e2e8f0;
-  padding: 0.375rem 0.5rem;
-  text-align: left;
-}
-.markdown-content :deep(th) {
-  background-color: #f8fafc;
-  font-weight: 600;
-}
-
-/* Wiki link + article reference styling inside assistant bubbles.
-   Mirrors wiki-page-viewer.vue so clicks feel consistent. The synthesis chip
-   is excluded: its shared rules live in styles/markdown.css and must not
-   have to out-specify these scoped (0,3,0) base rules. */
-.markdown-content :deep(.wikilink:not(.wikilink--synthesis)) {
-  color: rgb(79 70 229);
-  text-decoration: underline;
-  cursor: pointer;
-  text-decoration-style: dotted;
-}
-.markdown-content :deep(.wikilink:not(.wikilink--synthesis):hover) {
-  text-decoration-style: solid;
-}
-
-/* Synthesis wikilink chip + article-ref + section-badge styles are shared
- * with wiki-page-viewer in `src/styles/markdown.css` (global). */
-
-/* Tooltip animation */
-.tooltip-fade-enter-active,
-.tooltip-fade-leave-active {
-  transition:
-    opacity 0.15s ease,
-    transform 0.15s ease;
-}
-.tooltip-fade-enter-from,
-.tooltip-fade-leave-to {
-  opacity: 0;
-  transform: translate(-50%, -100%) scale(0.95) !important;
-}
 /* Slide transition for side panel */
 .slide-enter-active,
 .slide-leave-active {
@@ -2505,191 +709,5 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
 .slide-leave-to {
   transform: translateX(100%);
   opacity: 0;
-}
-
-/* Fade transition for the model-mismatch dialog (mirrors the article selector
-   + tooltip patterns - simple opacity + tiny scale). */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.18s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-/* Citation Finder disabled-provider banner (amber/warning chrome, mirrors the
-   wiki-banner layout but in warning colors so it reads as "blocked"). */
-.citation-disabled-banner {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.5rem;
-  background-color: rgb(254 243 199); /* amber-100 */
-  border: 1px solid rgb(252 211 77); /* amber-300 */
-  color: rgb(120 53 15); /* amber-900 */
-}
-
-.citation-disabled-banner__text {
-  flex: 1;
-  font-size: 0.72rem;
-  font-weight: 600;
-}
-
-.citation-disabled-banner__btn {
-  padding: 0.1875rem 0.5rem;
-  border-radius: 0.25rem;
-  border: 1px solid rgb(252 211 77); /* amber-300 */
-  background: #fff;
-  color: rgb(180 83 9); /* amber-700 */
-  font-size: 0.65rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background-color 0.15s;
-}
-
-.citation-disabled-banner__btn:hover {
-  background: rgb(254 249 195); /* amber-50 */
-}
-
-/* Citation Finder coverage / first-run notice. Muted slate chrome (not a
-   warning - just an FYI that the first search will trigger a one-time
-   embedding-generation pass). */
-.citation-coverage-notice {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.625rem;
-  border-radius: 0.375rem;
-  background-color: rgb(241 245 249); /* slate-100 */
-  border: 1px solid rgb(226 232 240); /* slate-200 */
-  color: rgb(71 85 105); /* slate-600 */
-  font-size: 0.6875rem;
-}
-
-/* Citation Finder model-mismatch confirmation dialog. */
-.mismatch-dialog {
-  background: #fff;
-  border-radius: 1rem;
-  box-shadow: 0 10px 40px rgb(0 0 0 / 0.18);
-  padding: 1.5rem;
-  max-width: 32rem;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.mismatch-dialog__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 9999px;
-  background: rgb(254 243 199); /* amber-100 */
-  color: rgb(180 83 9); /* amber-700 */
-}
-
-.mismatch-dialog__icon span.material-symbols-outlined {
-  font-size: 28px;
-}
-
-.mismatch-dialog__title {
-  font-size: 1rem;
-  font-weight: 700;
-  color: rgb(15 23 42); /* slate-900 */
-  margin: 0;
-}
-
-.mismatch-dialog__body {
-  font-size: 0.8rem;
-  line-height: 1.5;
-  color: rgb(71 85 105); /* slate-600 */
-  margin: 0;
-}
-
-.mismatch-dialog__body code {
-  background: rgb(241 245 249);
-  padding: 0.0625rem 0.25rem;
-  border-radius: 0.1875rem;
-  font-family: monospace;
-  font-size: 0.85em;
-  color: rgb(15 23 42);
-}
-
-.mismatch-dialog__actions {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: flex-end;
-  margin-top: 0.25rem;
-  flex-wrap: wrap;
-}
-
-.mismatch-dialog__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.4375rem 0.875rem;
-  border-radius: 0.5rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    background-color 0.15s,
-    opacity 0.15s;
-  border: 1px solid transparent;
-}
-
-.mismatch-dialog__btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.mismatch-dialog__btn--ghost {
-  background: transparent;
-  color: rgb(100 116 139); /* slate-500 */
-  border-color: rgb(203 213 225); /* slate-300 */
-}
-
-.mismatch-dialog__btn--ghost:hover:not(:disabled) {
-  background: rgb(241 245 249); /* slate-100 */
-}
-
-.mismatch-dialog__btn--secondary {
-  background: #fff;
-  color: rgb(71 85 105); /* slate-600 */
-  border-color: rgb(203 213 225); /* slate-300 */
-}
-
-.mismatch-dialog__btn--secondary:hover:not(:disabled) {
-  background: rgb(241 245 249); /* slate-100 */
-}
-
-.mismatch-dialog__btn--primary {
-  background: rgb(99 102 241); /* indigo-600 */
-  color: #fff;
-  border-color: rgb(79 70 229); /* indigo-700 */
-}
-
-.mismatch-dialog__btn--primary:hover:not(:disabled) {
-  background: rgb(79 70 229); /* indigo-700 */
-}
-
-.mismatch-dialog__spinner {
-  display: inline-block;
-  width: 0.875rem;
-  height: 0.875rem;
-  border: 1.5px solid rgb(255 255 255 / 0.4);
-  border-top-color: #fff;
-  border-radius: 9999px;
-  animation: mismatch-dialog-spin 0.7s linear infinite;
-}
-
-@keyframes mismatch-dialog-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 </style>

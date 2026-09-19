@@ -17,7 +17,12 @@ Help, the Bibliometrics suite, and Diagnostics.
 - `help-guide.vue` is the `/help` shell (tab bar + `?tab=`/`#hash` deep-link
   routing).
 - `chat-view.vue` is the `/chat` route (article-RAG chat + wiki-RAG chat via
-  the Wiki toggle; NOT keep-alive cached).
+  the Wiki toggle; NOT keep-alive cached). A thin orchestration shell: the
+  Citation Finder orchestration lives in `use-citation-finder-chat.ts`,
+  wiki mode in `use-chat-wiki.ts`, article context in
+  `use-chat-article-context.ts`, transcript scrolling in
+  `use-chat-transcript.ts` (see `composables/AGENTS.md`), and the heavy
+  markup in the chat-view feature components (see `components/AGENTS.md`).
 - `wiki-view.vue` is the `/wiki` route (sidebar + viewer + editor + graph +
   article detail slide-over).
 

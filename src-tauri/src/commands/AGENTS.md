@@ -148,8 +148,46 @@ rebuild). New contract:
   `ensure_chunks_for_full_text_articles(_with_progress)` stay byte-identical
   (they run inside the screening task's own lock scope).
 
+### Embedding generation + probe commands (`embedding.rs`)
+
+`generate_embeddings` / `regenerate_embeddings` build the backend-aware
+sender via `runner::backend_sender`. `probe_embeddings` (Test Connection
+path) is backend-aware through the same sender: cloud probes over HTTP,
+`bango_local` runs the offline probe. `get_embedding_status` /
+`get_embedding_model_mismatch` are read-only.
+
+### `local_embeddings.rs` - Bango Local component manager commands
+
+Seven commands over `embedding::local` (see `embedding/AGENTS.md` for the
+manifest/downloader contracts): `get_local_embeddings_status` (derived
+`state`: installing > unsupported > ready/repair_required/not_installed, plus
+`running`, `runtimeReady` (library at pinned size), `runtimeVersion` +
+`threadBudget` (Component Details), resolved paths, fallback flag, sizes,
+license fields),
+`install_local_embeddings` (async; target + repair-aware disk-space gates;
+`embedding:component` progress events; cancellable; model profile ->
+pinned runtime component -> engine self-test (session reset first) ->
+persist the Enabled/profile/768 capability triple when `bango_local` is the
+active selection; `RunningGuard` clears
+the running flag on every exit; cancel token reset right after winning the
+running slot so early cancels are honored), `cancel_local_embeddings_install`,
+`verify_local_embeddings` (async; hashing on `spawn_blocking`; running-guard),
+`remove_local_embeddings` (running-guard; resets the engine session + the
+capability triple when local was active; sweeps every candidate model root
+so a storage-root move cannot orphan an install). Managed state:
+`LocalEmbeddingsInstallState { cancel_token, running }` (AtomicBool pair);
+the shared engine arrives separately as managed `Arc<LocalEngine>` (see
+`embedding/AGENTS.md`). The T6 pair `get_embedding_backend` /
+`set_embedding_backend` read/write the machine-local selection via
+`EmbeddingBackend::parse_exact` (strict command boundary: invalid ids error,
+never fall back) and `set` resets the capability triple to `unknown` so the
+next probe re-evaluates under the new backend (selection never implies
+readiness).
+Lock discipline: the storage root resolves under a brief burst and is
+released before any network I/O; downloads never hold the DB mutex.
 
 ### Criteria harmonization (inclusion/exclusion division of labor)
+
 
 Inclusion criteria define the SCOPE of a review; exclusion criteria define
 INDEPENDENT removal reasons that would otherwise pass the inclusion filter

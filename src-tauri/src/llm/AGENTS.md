@@ -253,8 +253,8 @@ OpenAI-compatible). Routing an OpenAI-shaped body to
   and `send_embedding_batch_parallel` (embedding-specific: per-text split →
   sub-batch group → parallel HTTP → token-weighted mean-pool) are FREE
   functions (not `&self` methods) because `JoinSet::spawn` requires `'static`
-  futures; callers wrap the orchestrator into `HttpEmbeddingBatchSender` at the
-  call site. The runner takes `Arc<dyn EmbeddingBatchSender>` (injectable trait,
+  futures; callers wrap the orchestrator into the backend-aware
+  `BackendEmbeddingBatchSender` at the call site (`runner::backend_sender`). The runner takes `Arc<dyn EmbeddingBatchSender>` (injectable trait,
   mirrors `IngestLlmSender`) so its parallel + cancel behavior is unit-testable
   without a live provider.
 - **Lock discipline** (the runner): DB mutex is NEVER held across an `.await`.

@@ -212,6 +212,20 @@ navigation never loses the edit),
 [localStorage `bango-full-text-summaries`], section-summaries [localStorage
 `bango-section-summaries`], auto-translate [DB-backed
 `app_settings.auto_translate`]),
+`settings-embeddings.vue` (the Embeddings card, mounted directly under the
+provider card: "Embedding Provider" radio - Configured Provider vs Bango
+Local - where selecting Bango Local before a healthy install opens
+`embeddings-consent-dialog.vue` first (what runs locally, download size from
+the status payload, Gemma terms link via `openUrl`, Download and Enable /
+Cancel with Escape-to-cancel + cancel-button focus; Cancel leaves the
+selection unchanged); install/repair progress from `embedding:component`
+events with overall % + Cancel; repair banner for `repair_required` OR a
+missing runtime (`runtimeReady` false); Component Details (expandable:
+profile, model + 768 dims, ONNX Runtime version + CPU thread budget,
+installed size [computed whenever the profile dir exists], resolved paths,
+OneDrive-fallback note) with Verify Installation + two-step Remove; privacy
+table scoped to the embedding operation; state via `useLocalEmbeddings()`,
+see `composables/AGENTS.md`),
 `settings-screening-preferences.vue`, `settings-storage.vue`,
 `settings-reprocessing.vue` (owns the chunk-rebuild progress widget: live
 `chunk-rebuild:progress` bar with phase label, percent, counts + translated
@@ -222,6 +236,26 @@ the cascade phase; backend contract in
 `settings-project-management.vue`,
 `settings-notification-history.vue`, `settings-diagnostics.vue`. Shared card
 chrome lives in `settings-card-shared.css`.
+
+- `citation-local-embeddings-dialog.vue`: the T7 contextual prompt in
+  chat-view - fires when a Citation-Finder submit arrives with `bango_local`
+  selected but `localReady` false. [Download and Continue] streams live
+  `embedding:component` progress into the dialog and continues the held
+  search after a successful install; [Use Configured Provider] switches the
+  backend (the composable's backend-aware probe reopens the gates) and
+  continues; [Cancel] restores the prose. Failure keeps the dialog open with
+  the inline error. State via `useLocalEmbeddings()` in chat-view.
+- Chat-view feature components (props-down/events-up, no store access):
+  `chat-welcome-cards.vue` (empty-transcript three-mode overview; the
+  Citation Finder hint branches on the toggle state),
+  `chat-message-list.vue` (bubbles + citation stacks + thinking dots; owns
+  claim collapse, IEEE flattening, markdown/wiki rendering, bubble-click
+  routing; the `data-msg-idx` attributes feed the transcript scroll anchor),
+  `selected-articles-bar.vue` (context pills + hover tooltip),
+  `article-selector-modal.vue` (teleported selector; owns its search
+  filter), `citation-input-area.vue` (banners, controls row, prose +
+  progress; every change emitted), `citation-mismatch-dialog.vue`
+  (teleported Regenerate/Continue/Cancel dialog).
 
 ### Bibliometric network graph quartet (`*-network-graph.vue`)
 

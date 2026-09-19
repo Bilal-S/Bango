@@ -63,6 +63,14 @@ tests = [
 ]
 
 [[area]]
+name = "embedding"
+paths = ["src/embedding/**"]
+tests = [
+    "embedding_engine_live_test::live_embeddinggemma_q4_end_to_end",
+    "embedding_engine_live_test::embeddinggemma_q4_acceptance_smoke",
+]
+
+[[area]]
 name = "utils"
 paths = ["src/utils/**"]
 tests = [

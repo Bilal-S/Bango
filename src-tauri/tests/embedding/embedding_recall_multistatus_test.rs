@@ -61,7 +61,7 @@ fn empty_filter_returns_all_statuses() {
     insert_vec(&conn, "rej", TITLE_ABSTRACT_CHUNK_INDEX, &[0.1; 4]);
     insert_vec(&conn, "dup", TITLE_ABSTRACT_CHUNK_INDEX, &[0.1; 4]);
 
-    let all = embedding_repo::list_for_recall(&conn, 4, &[]).unwrap();
+    let all = embedding_repo::list_for_recall(&conn, 4, None, &[]).unwrap();
     assert_eq!(all.len(), 4, "empty filter = all 4 articles");
 }
 
@@ -76,7 +76,7 @@ fn single_status_filter_matches_historical_behavior() {
     insert_vec(&conn, "inc", TITLE_ABSTRACT_CHUNK_INDEX, &[0.1; 4]);
     insert_vec(&conn, "wk", TITLE_ABSTRACT_CHUNK_INDEX, &[0.1; 4]);
 
-    let incl = embedding_repo::list_for_recall(&conn, 4, &["included".to_string()]).unwrap();
+    let incl = embedding_repo::list_for_recall(&conn, 4, None, &["included".to_string()]).unwrap();
     assert_eq!(incl.len(), 1);
     assert_eq!(incl[0].article_id, "inc");
 }
@@ -97,9 +97,13 @@ fn multi_status_filter_working_plus_included() {
     insert_vec(&conn, "rej", TITLE_ABSTRACT_CHUNK_INDEX, &[0.1; 4]);
     insert_vec(&conn, "dup", TITLE_ABSTRACT_CHUNK_INDEX, &[0.1; 4]);
 
-    let hits =
-        embedding_repo::list_for_recall(&conn, 4, &["working".to_string(), "included".to_string()])
-            .unwrap();
+    let hits = embedding_repo::list_for_recall(
+        &conn,
+        4,
+        None,
+        &["working".to_string(), "included".to_string()],
+    )
+    .unwrap();
     let mut ids: Vec<String> = hits.into_iter().map(|r| r.article_id).collect();
     ids.sort();
     assert_eq!(ids, vec!["inc", "wk"], "working + included only; rejected + duplicate excluded");
@@ -124,6 +128,7 @@ fn three_status_filter() {
     let hits = embedding_repo::list_for_recall(
         &conn,
         4,
+        None,
         &["working".to_string(), "included".to_string(), "rejected".to_string()],
     )
     .unwrap();
@@ -143,6 +148,7 @@ fn status_filter_with_unmatched_status_still_returns_matched() {
     let hits = embedding_repo::list_for_recall(
         &conn,
         4,
+        None,
         &["included".to_string(), "rejected".to_string()],
     )
     .unwrap();
@@ -159,9 +165,13 @@ fn status_filter_all_unmatched_returns_empty() {
 
     insert_vec(&conn, "inc", TITLE_ABSTRACT_CHUNK_INDEX, &[0.1; 4]);
 
-    let hits =
-        embedding_repo::list_for_recall(&conn, 4, &["working".to_string(), "rejected".to_string()])
-            .unwrap();
+    let hits = embedding_repo::list_for_recall(
+        &conn,
+        4,
+        None,
+        &["working".to_string(), "rejected".to_string()],
+    )
+    .unwrap();
     assert!(hits.is_empty(), "no article has working or rejected status");
 }
 
@@ -177,16 +187,24 @@ fn multi_status_filter_combined_with_dimension_filter() {
     insert_vec(&conn, "wk8", TITLE_ABSTRACT_CHUNK_INDEX, &[0.1; 8]); // 8-dim, working
 
     // Query dim=4: only inc4 matches (dimension + status).
-    let hits4 =
-        embedding_repo::list_for_recall(&conn, 4, &["working".to_string(), "included".to_string()])
-            .unwrap();
+    let hits4 = embedding_repo::list_for_recall(
+        &conn,
+        4,
+        None,
+        &["working".to_string(), "included".to_string()],
+    )
+    .unwrap();
     assert_eq!(hits4.len(), 1);
     assert_eq!(hits4[0].article_id, "inc4");
 
     // Query dim=8: only wk8 matches.
-    let hits8 =
-        embedding_repo::list_for_recall(&conn, 8, &["working".to_string(), "included".to_string()])
-            .unwrap();
+    let hits8 = embedding_repo::list_for_recall(
+        &conn,
+        8,
+        None,
+        &["working".to_string(), "included".to_string()],
+    )
+    .unwrap();
     assert_eq!(hits8.len(), 1);
     assert_eq!(hits8[0].article_id, "wk8");
 }
@@ -204,7 +222,7 @@ fn multi_status_filter_returns_all_chunks_for_matched_articles() {
     insert_vec(&conn, "inc", 0, &[0.2; 4]);
     insert_vec(&conn, "inc", 1, &[0.3; 4]);
 
-    let hits = embedding_repo::list_for_recall(&conn, 4, &["included".to_string()]).unwrap();
+    let hits = embedding_repo::list_for_recall(&conn, 4, None, &["included".to_string()]).unwrap();
     assert_eq!(hits.len(), 3, "all 3 chunk rows returned for the matched article");
 }
 

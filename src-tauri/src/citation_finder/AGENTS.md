@@ -68,7 +68,8 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   `useLlmConfigured()` pattern). The previous one-shot `onMounted` check went
   stale until the user navigated away and back.
 
-  **Static-override for known-unsupported providers (authoritative)**:
+  **Static-override for known-unsupported providers (authoritative, cloud
+  backend only)**:
   `compute_readiness` consults `llm::embedding::check_embedding_support(provider)`
   and, when the configured provider is statically known-unsupported
   (`Anthropic` / `ZAi`), the REPORTED `embedding_status` is ALWAYS overridden
@@ -82,6 +83,37 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   tests in `tests/citation_finder/citation_finder_readiness_test.rs`, including
   `compute_readiness_anthropic_overrides_persisted_enabled` which asserts the
   override wins over a stale persisted `enabled`.
+
+  **Backend-aware readiness (T7)**: the static override applies ONLY to the
+  `configured_provider` backend. With `bango_local` selected the payload
+  instead carries `embedding_backend` + `local_ready` (model profile `Ready`
+  + runtime library at its pinned size; cheap FS probes via the
+  side-effect-free storage-root read - a deliberate lock-burst exception,
+  see `local_components_ready`), the frontend keeps the toggle
+  clickable, and a submit opens the contextual download prompt
+  (`citation-local-embeddings-dialog.vue`: Download and Continue / Use
+  Configured Provider / Cancel). The Phase A gate message is backend-aware
+  (local: unavailable - not installed OR last self-test failed; cloud:
+  provider hint). Pinned by the
+  `compute_readiness_{bango_local_*,cloud_backend_*}` tests.
+
+  **Stale-disabled self-healing (findings-6 3.5)**: healthy local components
+  + a persisted `disabled` triple (a transient self-test failure) would
+  hard-block Citation Finder with no recovery path. The chat view fires the
+  backend-aware offline probe ONCE when readiness reports local + ready +
+  disabled and re-reads the payload - transient failures clear themselves;
+  persistent failures stay disabled with accurate tooltip + Phase A wording.
+
+  **Authoritative local gate + model-scoped coverage (findings-7 L6/L2)**:
+  `provider_supports_embeddings` is `local_ready` for the `bango_local`
+  backend (actual readiness, not the persisted triple - a fresh switch's
+  Unknown no longer slips through Phase A). Coverage counts and
+  `list_for_recall` filter by the CURRENT `model_name` (when known) in
+  addition to dimensions, so same-dimension models (Google
+  text-embedding-004 vs EmbeddingGemma, both 768) never mix vector spaces;
+  a backend switch reads as 0% coverage and Phase B regenerates. The payload
+  also carries `chat_provider_supports_embeddings` so the contextual
+  prompt's "Use Configured Provider" option hides for Anthropic/Z.AI.
 
   **Provider-card debounced save** (`settings-provider-card.vue`): the
   debounced auto-save watcher tracks `provider`, `endpointUrl`, `modelName`,

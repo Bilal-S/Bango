@@ -18,17 +18,14 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tauri::{Emitter, Manager, State};
+use tauri::{Emitter, State};
 
 use crate::db::app_settings_repo;
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
 use crate::db::llm_config_repo;
 use crate::embedding::director::EmbeddingScope;
-use crate::embedding::runner::{
-    generate_embeddings_inner, EmbeddingRunReport, HttpEmbeddingBatchSender,
-};
-use crate::llm::orchestrator::LlmOrchestrator;
+use crate::embedding::runner::{generate_embeddings_inner, EmbeddingRunReport};
 
 use super::BatchImportPhaseResult;
 
@@ -98,10 +95,22 @@ pub async fn run_embeddings_phase(
     call + DB write per article). */
     let cancel_atomic = Arc::clone(&cancel_handle);
 
-    let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>().inner().clone();
-    // Wrap the orchestrator into the v2 HttpEmbeddingBatchSender.
+    // Backend-aware production sender (cloud = orchestrator, local = engine).
+    // This phase returns a plain result struct, so a sender-construction
+    // failure becomes a skipped-phase outcome (mirrors the pre-flight gates).
     let sender: Arc<dyn crate::embedding::runner::EmbeddingBatchSender> =
-        Arc::new(HttpEmbeddingBatchSender::new(Arc::clone(&orchestrator)));
+        match crate::embedding::runner::backend_sender(app_handle) {
+            Ok(sender) => sender,
+            Err(e) => {
+                return BatchImportPhaseResult {
+                    total: 0,
+                    processed: 0,
+                    succeeded: 0,
+                    failed: 0,
+                    errors: vec![format!("Skipped: {e}")],
+                };
+            }
+        };
     let scope = EmbeddingScope {
         article_ids: None,
         status_filter: Some("included".to_string()),

@@ -11,6 +11,7 @@ pub mod full_text;
 pub mod import;
 pub mod labels;
 pub mod llm_config;
+pub mod local_embeddings;
 pub mod openalex;
 pub mod prisma;
 pub mod references;

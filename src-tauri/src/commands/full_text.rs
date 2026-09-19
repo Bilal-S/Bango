@@ -11,7 +11,7 @@ use crate::db::connection::{lock_state, DbState};
 use crate::db::embedding_repo;
 use crate::embedding::director::EmbeddingScope;
 use crate::embedding::runner::{
-    generate_embeddings_inner, EmbeddingBatchSender, EmbeddingRunReport, HttpEmbeddingBatchSender,
+    generate_embeddings_inner, EmbeddingBatchSender, EmbeddingRunReport,
 };
 use crate::error::AppError;
 use crate::scraping::citation_chaser::clean_doi_filename;
@@ -1299,8 +1299,6 @@ async fn run_embedding_cascade(
         emit_rebuild_progress(Some(app_handle), &payload);
     }
 
-    let orchestrator =
-        app_handle.state::<Arc<crate::llm::orchestrator::LlmOrchestrator>>().inner().clone();
     let mut regen_report: Option<EmbeddingRunReport> = None;
     let mut backfill_report: Option<EmbeddingRunReport> = None;
     let mut failure: Option<String> = None;
@@ -1308,8 +1306,9 @@ async fn run_embedding_cascade(
     for (scope, slot) in [(regen_scope, &mut regen_report), (backfill_scope, &mut backfill_report)]
     {
         let Some(scope) = scope else { continue };
+        // Backend-aware production sender (cloud = orchestrator, local = engine).
         let sender: Arc<dyn EmbeddingBatchSender> =
-            Arc::new(HttpEmbeddingBatchSender::new(Arc::clone(&orchestrator)));
+            crate::embedding::runner::backend_sender(app_handle)?;
         /* `emit_events = true`: the runner emits per-article
         `embedding:progress` + final `embedding:done` for live sub-progress.
         The shared cancel token lets Cancel abort this cascade too. */

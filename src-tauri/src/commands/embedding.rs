@@ -15,11 +15,9 @@ use crate::db::connection::{lock_conn, DbState};
 use crate::db::llm_config_repo;
 use crate::embedding::director::EmbeddingScope;
 use crate::embedding::recall::EmbeddingHit;
-use crate::embedding::runner::{
-    generate_embeddings_inner, EmbeddingRunReport, HttpEmbeddingBatchSender,
-};
+use crate::embedding::runner::{generate_embeddings_inner, EmbeddingRunReport};
 use crate::error::AppError;
-use crate::llm::embedding::{probe_embedding_support, ProbeOutcome};
+use crate::llm::embedding::ProbeOutcome;
 use crate::llm::orchestrator::LlmOrchestrator;
 
 /// The status payload returned by `get_embedding_status` + `probe_embeddings`.
@@ -86,11 +84,11 @@ pub async fn generate_embeddings(
     status_filter: Option<String>,
     force: Option<bool>,
 ) -> Result<EmbeddingRunReport, AppError> {
-    let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>().inner().clone();
-    /* Wrap the orchestrator into HttpEmbeddingBatchSender so the runner's
-     * parallel + cancel behavior is unit-testable without a live LLM. */
+    /* Backend-aware production sender: cloud goes through the orchestrator
+     * (byte-identical to the previous Http sender); Bango Local runs the
+     * engine. Selection + storage root resolve under one brief lock. */
     let sender: Arc<dyn crate::embedding::runner::EmbeddingBatchSender> =
-        Arc::new(HttpEmbeddingBatchSender::new(Arc::clone(&orchestrator)));
+        crate::embedding::runner::backend_sender(&app_handle)?;
     let scope = EmbeddingScope { article_ids, status_filter, force: force.unwrap_or(false) };
     /* Spawn background task so IPC returns immediately. Frontend listens to
      * `embedding:progress`/`embedding:done`. Runner re-derives DbState from
@@ -127,9 +125,12 @@ pub async fn recall_articles(
     status_filter: Vec<String>,
 ) -> Result<Vec<EmbeddingHit>, AppError> {
     let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>().inner().clone();
+    let engine =
+        app_handle.state::<Arc<crate::embedding::local::engine::LocalEngine>>().inner().clone();
     crate::embedding::recall::recall(
         &db_state,
         &orchestrator,
+        &engine,
         &query,
         top_k.unwrap_or(30),
         &status_filter,
@@ -153,31 +154,28 @@ pub fn get_embedding_status(db_state: State<'_, DbState>) -> Result<EmbeddingSta
     })
 }
 
-/// Probe the provider for embedding support. Sets triple-state + model +
-/// dimensions. Used by `Test Connection` and after config changes.
+/// Probe the embedding capability. Sets triple-state + model + dimensions.
+/// Used by `Test Connection` and after config changes. Backend-aware: the
+/// `ConfiguredProvider` backend probes the cloud provider over HTTP; the
+/// `BangoLocal` backend runs the offline local probe (state check + session
+/// self-test) and needs no cloud config.
 #[tauri::command]
-pub async fn probe_embeddings(db_state: State<'_, DbState>) -> Result<ProbeOutcome, AppError> {
-    // Read config (brief lock), release, then probe (HTTP), then persist (brief lock).
-    let config = {
+pub async fn probe_embeddings(
+    db_state: State<'_, DbState>,
+    app_handle: tauri::AppHandle,
+) -> Result<ProbeOutcome, AppError> {
+    // Read config + override (brief lock), release, then probe, then persist
+    // (brief lock). Config may be None - the local backend works without it
+    // and the cloud default probe reports "LLM not configured".
+    let (config, override_model) = {
         let conn = lock_conn(&db_state.conn)?;
-        llm_config_repo::get_config(&conn)?
+        (
+            llm_config_repo::get_config(&conn)?,
+            app_settings_repo::get_embedding_model_override(&conn)?,
+        )
     };
-    let Some(cfg) = config else {
-        let outcome = ProbeOutcome {
-            status: "disabled".to_string(),
-            model: String::new(),
-            dimensions: 0,
-            reason: "LLM not configured".to_string(),
-        };
-        return Ok(outcome);
-    };
-    // Forward the user's embedding-model override (premium) so the probe tries
-    // it first, ahead of auto-detection.
-    let override_model = {
-        let conn = lock_conn(&db_state.conn)?;
-        app_settings_repo::get_embedding_model_override(&conn)?
-    };
-    let outcome = probe_embedding_support(&cfg, override_model.as_deref()).await;
+    let sender = crate::embedding::runner::backend_sender(&app_handle)?;
+    let outcome = sender.probe_capability(config.as_ref(), override_model.as_deref()).await;
     let new_status = if outcome.status == "enabled" {
         EmbeddingStatus::Enabled
     } else {
@@ -255,9 +253,8 @@ pub async fn regenerate_embeddings(
     }
 
     // Phase 2: re-embed (background task; emits `embedding:progress`/`done`).
-    let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>().inner().clone();
     let sender: Arc<dyn crate::embedding::runner::EmbeddingBatchSender> =
-        Arc::new(HttpEmbeddingBatchSender::new(Arc::clone(&orchestrator)));
+        crate::embedding::runner::backend_sender(&app_handle)?;
     /* `force=false` is correct: the delete above emptied relevant rows, so the
      * director's hash-comparison naturally produces full work. (force=true
      * would work but bypass the model-mismatch signal in the report.) */

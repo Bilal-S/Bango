@@ -50,7 +50,9 @@ export interface CitationResult {
 }
 
 /** Readiness payload driving toggle visibility/disabled state. Toggle renders
- *  disabled (not hidden) when `embeddingStatus === 'disabled'`. */
+ *  disabled (not hidden) when `embeddingStatus === 'disabled'` - except when
+ *  `embeddingBackend === 'bango_local'`, where a missing install stays
+ *  clickable so the contextual download prompt can fire. */
 export interface CitationFinderReadiness {
   totalArticles: number;
   embeddedCount: number;
@@ -61,6 +63,18 @@ export interface CitationFinderReadiness {
   embeddingStatus: 'unknown' | 'enabled' | 'disabled';
   /** Last-working embedding model name. `null` when not probed or disabled. */
   embeddingModel: string | null;
+  /** Machine-local backend selection: `'configured_provider' | 'bango_local'`.
+   *  With `bango_local` the chat-provider static check is skipped and
+   *  `localReady` drives the contextual prompt. */
+  embeddingBackend: 'configured_provider' | 'bango_local';
+  /** When `embeddingBackend === 'bango_local'`: whether the local
+   *  components are installed + healthy (local backend only; always `false`
+   *  for the cloud backend). */
+  localReady: boolean;
+  /** Whether the CHAT provider (when configured) statically supports an
+   *  embedding API - drives the contextual prompt's "Use Configured
+   *  Provider" option (hidden for Anthropic/Z.AI). */
+  chatProviderSupportsEmbeddings: boolean;
 }
 
 /** Model-mismatch payload. `null` when rows match current model. Drives

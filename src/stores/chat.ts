@@ -18,7 +18,7 @@ import {
 /** Retrieval source for next outgoing message. Mutually exclusive. */
 type ChatSource = 'articles' | 'wiki' | 'citation-finder';
 
-interface ChatMessage {
+export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;

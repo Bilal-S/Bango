@@ -3,6 +3,7 @@ import { computed, onMounted, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import { useFeatureFlags } from '@/composables/use-feature-flags';
 import SettingsProviderCard from '@/components/settings/settings-provider-card.vue';
+import SettingsEmbeddings from '@/components/settings/settings-embeddings.vue';
 import SettingsAiSummaries from '@/components/settings/settings-ai-summaries.vue';
 import SettingsScreeningPreferences from '@/components/settings/settings-screening-preferences.vue';
 import SettingsStorage from '@/components/settings/settings-storage.vue';
@@ -52,6 +53,9 @@ onMounted(() => {
 
     <!-- Consolidated AI Provider box (warning + connection + params + actions + feedback) -->
     <SettingsProviderCard />
+
+    <!-- Embedding backend (Configured Provider vs on-device Bango Local) -->
+    <SettingsEmbeddings />
 
     <!-- Non-LLM settings cards -->
     <div class="settings-view__cards">

@@ -3,6 +3,7 @@ import { watch, ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router';
 import { useLlmConfig } from '@/composables/use-llm-config';
 import { useEmbeddingSettings } from '@/composables/use-embedding-settings';
+import { useLocalEmbeddings } from '@/composables/use-local-embeddings';
 import { useFeatureFlags } from '@/composables/use-feature-flags';
 import { useScreeningStore } from '@/stores/screening';
 import { useToast } from '@/composables/use-toast';
@@ -319,10 +320,18 @@ function handleEmbeddingSaveError(e: unknown): void {
   );
 }
 
+/* Bango Local backend selection: the premium embedding-model override only
+   applies to the Configured Provider backend, so the field disables while
+   local is active. `backend` is module-level shared state, so a switch made
+   in the Embeddings card is reflected here without cross-card plumbing. */
+const { backend: embeddingBackend, loadBackend: loadEmbeddingBackend } = useLocalEmbeddings();
+const localEmbeddingsActive = computed(() => embeddingBackend.value === 'bango_local');
+
 onMounted(() => {
   if (isPremium.value) {
     void loadEmbeddingOverride();
   }
+  void loadEmbeddingBackend();
 });
 
 /* Bootstrap race: if this card mounts before `initFeatureFlags` resolves,
@@ -499,7 +508,9 @@ onBeforeUnmount(() => {
 
           <!-- Embedding Model override (premium only). Sits directly under the
                Model Name / API Key row. When set, the embedding probe tries
-               this model first; when empty, auto-detection is used. -->
+               this model first; when empty, auto-detection is used.
+               Inactive while the Bango Local backend is selected (the
+               override only applies to the Configured Provider backend). -->
           <div v-if="isPremium" class="field provider-card__embedding-override">
             <label class="field__label">
               Embedding Model
@@ -510,6 +521,7 @@ onBeforeUnmount(() => {
                 v-model="modelOverride"
                 type="text"
                 class="field__input field__input--mono"
+                :disabled="localEmbeddingsActive"
                 placeholder="e.g. text-embedding-3-large (leave blank for auto)"
               />
               <span
@@ -519,8 +531,14 @@ onBeforeUnmount(() => {
               >
             </div>
             <p class="field__hint">
-              Overrides auto-detection for the Citation Finder embeddings. Leave blank to let the
-              probe pick the model.
+              <template v-if="localEmbeddingsActive">
+                Bango Local is selected as the embedding provider, so this override is inactive.
+                Switch back to Configured Provider in the Embeddings card to use it.
+              </template>
+              <template v-else>
+                Overrides auto-detection for the Citation Finder embeddings. Leave blank to let the
+                probe pick the model.
+              </template>
             </p>
           </div>
 

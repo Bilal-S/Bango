@@ -120,7 +120,12 @@ impl CitationLlmSender for HttpCitationLlmSender {
         statuses: &[String],
     ) -> Result<Vec<EmbeddingHit>, AppError> {
         let db_state = self.app_handle.state::<DbState>();
-        recall::recall(&db_state, &self.orchestrator, query, top_k, statuses).await
+        let engine = self
+            .app_handle
+            .state::<Arc<crate::embedding::local::engine::LocalEngine>>()
+            .inner()
+            .clone();
+        recall::recall(&db_state, &self.orchestrator, &engine, query, top_k, statuses).await
     }
 }
 
@@ -193,10 +198,20 @@ pub async fn find_citations_inner(
         compute_readiness(&conn, &status_filter)?
     };
     if !readiness.provider_supports_embeddings {
-        return Err(AppError::Import(
-            "Provider does not support embeddings. Configure an embedding-capable LLM provider."
-                .to_string(),
-        ));
+        // Backend-aware message (T7): with `bango_local` selected, a Disabled
+        // status means the local components are missing OR the last offline
+        // probe's self-test failed - the chat provider is irrelevant either
+        // way.
+        return Err(AppError::Import(if readiness.embedding_backend == "bango_local" {
+            "Bango Local embeddings are unavailable (not installed, or the last self-test \
+                 failed). Open Settings - Embeddings to download or re-verify them, or \
+                 switch back to your configured provider."
+                .to_string()
+        } else {
+            "Provider does not support embeddings. Configure an embedding-capable LLM \
+                 provider."
+                .to_string()
+        }));
     }
     if readiness.total_articles == 0 {
         emit_progress(CitationFinderProgress {

@@ -16,7 +16,97 @@
 //!   1. `resolve_effective_dim` - pick the correct effective dimensionality.
 //!   2. `vector_matches_dim` - per-row length guard before storage.
 
-use bango_lib::embedding::runner::{resolve_effective_dim, vector_matches_dim};
+use std::sync::Arc;
+
+use bango_lib::embedding::backend::EmbeddingBackend;
+use bango_lib::embedding::local::engine::LocalEngine;
+use bango_lib::embedding::runner::{
+    resolve_effective_dim, vector_matches_dim, BackendEmbeddingBatchSender, EmbeddingBatchSender,
+};
+use bango_lib::llm::orchestrator::LlmOrchestrator;
+use bango_lib::models::llm_config::{LlmConfig, LlmProvider};
+
+// ── BackendEmbeddingBatchSender routing (T5 backend split) ───────────────────
+
+fn sender_for(
+    backend: EmbeddingBackend,
+    storage_root: &std::path::Path,
+) -> BackendEmbeddingBatchSender {
+    BackendEmbeddingBatchSender::new(
+        Arc::new(LlmOrchestrator::new(1, 0)),
+        Arc::new(LocalEngine::new()),
+        backend,
+        storage_root,
+    )
+}
+
+#[tokio::test]
+async fn sender_local_backend_routes_to_engine_gate() {
+    // With `bango_local` selected and nothing installed under the storage
+    // root, a document batch must be REFUSED by the engine's actionable gate
+    // (never silently delegated to the cloud provider): the error points at
+    // Settings, and no HTTP happens.
+    let dir = tempfile::tempdir().unwrap();
+    let sender = sender_for(EmbeddingBackend::BangoLocal, dir.path());
+    let cfg = LlmConfig {
+        provider: LlmProvider::Openai,
+        endpoint_url: "https://invalid.invalid".to_string(),
+        api_key_encrypted: None,
+        model_name: "gpt-x".to_string(),
+        temperature: 0.0,
+        skip_temperature: false,
+        max_concurrent_requests: 1,
+        request_delay_ms: 0,
+        context_window_tokens: 8192,
+    };
+
+    let err = sender
+        .send_embedding_batch_parallel(&cfg, &["doc".to_string()], "gpt-x")
+        .await
+        .expect_err("local backend refuses an uninstalled profile");
+    assert!(err.to_string().contains("Settings"), "got: {err}");
+}
+
+#[tokio::test]
+async fn sender_local_probe_reports_not_installed_without_cloud_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let sender = sender_for(EmbeddingBackend::BangoLocal, dir.path());
+
+    let outcome = sender.probe_capability(None, None).await;
+    assert_eq!(outcome.status, "disabled");
+    assert!(
+        outcome.reason.contains("not installed"),
+        "reason must be actionable: {}",
+        outcome.reason
+    );
+    assert_eq!(outcome.model, "", "no model is claimed for a disabled probe");
+}
+
+#[test]
+fn sender_provider_id_labels_backend() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = LlmConfig {
+        provider: LlmProvider::Openai,
+        endpoint_url: String::new(),
+        api_key_encrypted: None,
+        model_name: String::new(),
+        temperature: 0.0,
+        skip_temperature: false,
+        max_concurrent_requests: 1,
+        request_delay_ms: 0,
+        context_window_tokens: 8192,
+    };
+    // Cloud selection keeps the chat-provider identity on generated rows;
+    // local rows record the backend identity.
+    assert_eq!(
+        sender_for(EmbeddingBackend::ConfiguredProvider, dir.path()).provider_id(&cfg),
+        "Openai"
+    );
+    assert_eq!(
+        sender_for(EmbeddingBackend::BangoLocal, dir.path()).provider_id(&cfg),
+        "bango_local"
+    );
+}
 
 // ── resolve_effective_dim ────────────────────────────────────────────────────
 

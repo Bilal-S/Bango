@@ -84,7 +84,7 @@ pub struct TestConnectionResult {
 pub async fn test_llm_connection(
     db_state: State<'_, DbState>,
     orchestrator: State<'_, Arc<LlmOrchestrator>>,
-    _app_handle: tauri::AppHandle,
+    app_handle: tauri::AppHandle,
 ) -> Result<TestConnectionResult, AppError> {
     let (config, embedding_override) = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
@@ -93,6 +93,10 @@ pub async fn test_llm_connection(
         let ov = crate::db::app_settings_repo::get_embedding_model_override(&conn)?;
         (cfg, ov)
     };
+    /* Backend-aware embedding probe sender: cloud selection probes over HTTP
+    (previous behavior); `bango_local` runs the offline local probe. */
+    let embedding_sender: std::sync::Arc<dyn crate::embedding::runner::EmbeddingBatchSender> =
+        crate::embedding::runner::backend_sender(&app_handle)?;
 
     /* First attempt: use config as-is (temperature included unless already
     skipped). The client-level `send_with_temperature_recovery` may
@@ -120,8 +124,12 @@ pub async fn test_llm_connection(
                 /* Probe embedding support synchronously so the response
                 includes the outcome. Forward the embedding-model override
                 (premium) so the probe tries it first. */
-                let (emb_status, emb_model, emb_dims, emb_suffix) =
-                    probe_embeddings_sync(&retry_config, embedding_override.as_deref()).await;
+                let (emb_status, emb_model, emb_dims, emb_suffix) = probe_embeddings_sync(
+                    embedding_sender.as_ref(),
+                    &retry_config,
+                    embedding_override.as_deref(),
+                )
+                .await;
                 /* Persist the probe outcome. Forwards real dimensions so
                 `recall` (gated on `dimensions > 0`) works immediately
                 instead of waiting for the first `generate_embeddings`. */
@@ -138,8 +146,12 @@ pub async fn test_llm_connection(
                 /* Plain success: probe embedding support synchronously so the
                 response includes the outcome. Forward the embedding-model
                 override (premium) so the probe tries it first. */
-                let (emb_status, emb_model, emb_dims, emb_suffix) =
-                    probe_embeddings_sync(&config, embedding_override.as_deref()).await;
+                let (emb_status, emb_model, emb_dims, emb_suffix) = probe_embeddings_sync(
+                    embedding_sender.as_ref(),
+                    &config,
+                    embedding_override.as_deref(),
+                )
+                .await;
                 persist_embedding_probe(&db_state, &emb_status, &emb_model, emb_dims);
                 Ok(TestConnectionResult {
                     success: true,
@@ -169,9 +181,12 @@ pub async fn test_llm_connection(
                         /* Probe embedding support synchronously. Forward the
                         embedding-model override (premium) so the probe
                         tries it first. */
-                        let (emb_status, emb_model, emb_dims, emb_suffix) =
-                            probe_embeddings_sync(&retry_config, embedding_override.as_deref())
-                                .await;
+                        let (emb_status, emb_model, emb_dims, emb_suffix) = probe_embeddings_sync(
+                            embedding_sender.as_ref(),
+                            &retry_config,
+                            embedding_override.as_deref(),
+                        )
+                        .await;
                         persist_embedding_probe(&db_state, &emb_status, &emb_model, emb_dims);
                         Ok(TestConnectionResult {
                             success: true,
@@ -239,15 +254,18 @@ pub fn persist_embedding_probe_to_conn(
         dimensions,
     )
 }
-/// Runs the embedding probe HTTP call, returns the outcome tuple. Does NOT
+/// Runs the embedding probe, returns the outcome tuple. Does NOT
 /// persist (caller does that after the `.await` in a brief lock burst, keeping
-/// the function `Send`). `override_model`: premium pinned model name; tried
-/// first with auto-detection fallback on failure.
+/// the function `Send`). `sender`: backend-aware probe (cloud HTTP probe vs
+/// the offline local probe when `bango_local` is selected). `override_model`:
+/// premium pinned model name; tried first with auto-detection fallback on
+/// failure (cloud path only).
 async fn probe_embeddings_sync(
+    sender: &dyn crate::embedding::runner::EmbeddingBatchSender,
     config: &LlmConfig,
     override_model: Option<&str>,
 ) -> (Option<String>, Option<String>, i32, String) {
-    let outcome = crate::llm::embedding::probe_embedding_support(config, override_model).await;
+    let outcome = sender.probe_capability(Some(config), override_model).await;
 
     /* Build the response fields + message suffix (no DB access). Forwards
     real dimensions so `recall` works immediately instead of waiting for

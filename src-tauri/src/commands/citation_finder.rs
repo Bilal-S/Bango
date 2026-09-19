@@ -13,7 +13,6 @@ use tauri::{Emitter, Manager, State};
 
 use crate::citation_finder::{CitationFinderMode, CitationFinderProgress, CitationFinderReadiness};
 use crate::db::connection::{lock_conn, DbState};
-use crate::embedding::runner::HttpEmbeddingBatchSender;
 use crate::error::AppError;
 use crate::llm::orchestrator::LlmOrchestrator;
 
@@ -91,7 +90,7 @@ pub async fn find_citations(
     let progress = cf_state.progress_handle();
     let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>().inner().clone();
     let embedding_sender: Arc<dyn crate::embedding::runner::EmbeddingBatchSender> =
-        Arc::new(HttpEmbeddingBatchSender::new(Arc::clone(&orchestrator)));
+        crate::embedding::runner::backend_sender(&app_handle)?;
     let llm_sender: Arc<dyn crate::citation_finder::search::CitationLlmSender> =
         Arc::new(HttpCitationLlmSender {
             orchestrator: Arc::clone(&orchestrator),

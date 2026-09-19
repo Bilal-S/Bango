@@ -59,8 +59,26 @@ views, LLM config, wiki, dashboard, saved reports, and the startup upgrade.
   `use-llm-configured.ts` (the canonical LLM gate, `src/AGENTS.md`),
   `use-embedding-settings.ts` (premium embedding-model override load/save;
   `isPersisted` marks backend-known values so auto-save watchers skip
-  propagation, never user edits - contract in `components/AGENTS.md`), and
-  `use-demo.ts` (loads `assets/demo-project.bango.json`).
+  propagation, never user edits - contract in `components/AGENTS.md`),
+  `use-local-embeddings.ts` (the Embeddings card's state: backend selection
+  + local component status + install/cancel/verify/remove + the
+  `embedding:component` progress listener, one `listen` per scope released
+  on dispose; the `backend` ref is MODULE-LEVEL shared state so the
+  Embeddings card and the provider card's override field see switches
+  immediately; terminal `done`/`error` events clear `installing` and reload
+  the status),
+  `use-citation-finder-chat.ts` (chat-view's Citation Finder orchestration:
+  readiness + backend-aware toggle state/title with the stale-disabled
+  self-heal, the submit pipeline - contextual local-embeddings prompt ->
+  model-mismatch dialog -> dispatch - and both dialogs' handlers; wired in
+  chat-view with deferred self-references for `checkReadiness`/`runSearch`),
+  `use-chat-wiki.ts` (wiki availability, page-title + source-metadata maps,
+  drift check, wiki-mode toggle, reader nav stack),
+  `use-chat-article-context.ts` (candidate article list + context-set
+  toggling + selector open state),
+  `use-chat-transcript.ts` (scroll-to-bottom + the citation result-arrival
+  anchor; the view owns and binds the container ref),
+  and `use-demo.ts` (loads `assets/demo-project.bango.json`).
 
 ## Local Contracts
 

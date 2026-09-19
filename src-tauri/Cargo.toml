@@ -27,9 +27,8 @@ sha2 = "0.10"
 base64 = "0.22"
 # The `blocking` feature is required by the Citation Chaser RIS download path
 # (`scraping::citation_chaser::download_with_reqwest`), which runs on the
-# `spawn_blocking` pool. See `.worktrees/scrapefix2.md` §5.3 for the contract;
-# `reqwest::blocking` is safe there because the scrape is NOT on a tokio async
-# worker thread.
+# `spawn_blocking` pool. `reqwest::blocking` is safe there because the scrape
+# is NOT on a tokio async worker thread.
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 # Percent-decoding of Zotero `file://` attachment Location headers.
 percent-encoding = "2"
@@ -50,6 +49,19 @@ headless_chrome = "1"
 rand = "0.10"
 regex = "1"
 rust-stemmers = "1.2"
+# Bango Local embeddings (T4/T5): in-process ONNX inference. Both crates are
+# pinned exactly (ort is a release candidate). `ort-load-dynamic` keeps the
+# ONNX Runtime dylib OUT of the build/installer: the component manager
+# downloads it on demand and points ort at it. The direct `ort` dependency
+# is the T5 API surface (`ort::init_from`, execution-provider config) and
+# keeps the feature set unified with fastembed's `ort-load-dynamic`; today
+# it is exercised only via the `ORT_DYLIB_PATH` env var in the live spike test.
+fastembed = { version = "=7.0.1", default-features = false, features = ["ort-load-dynamic"] }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic"] }
+# Runtime archive extraction for the component manager (tar.gz releases from
+# Microsoft; .zip uses the existing `zip` dependency).
+flate2 = "1"
+tar = "0.4"
  once_cell = "1.18"
  unpdf = "0.7.0"
 # Charset detection + decoding for legacy CJK PDFs whose fonts use Shift-JIS /
@@ -59,6 +71,7 @@ rust-stemmers = "1.2"
  encoding_rs = "0.8"
  chardetng = "0.1"
  zip = "2"
+fs4 = "1.1.0"
 
 [dev-dependencies]
 mockito = "1"

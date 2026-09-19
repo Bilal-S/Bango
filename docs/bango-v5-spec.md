@@ -289,6 +289,7 @@ Application configurations are managed in the `app_settings` key-value table:
 * **`screening_custom_logic`**: Optional combinatorial screening rules (AND/OR gates, hard exclusions). See §4.1 for governance contract.
 * **`summary_evidence_mode`**: Project-wide evidence enrichment for literature reviews (`abstract_only` default | `with_summary_facts`).
 * **`embedding_status` / `embedding_model` / `embedding_dimensions`**: Triple-state embedding capability flag (see §8.6).
+* **`embedding_backend`**: Which backend generates embeddings: `configured_provider` (default, follows the configured AI provider) or `bango_local` (on-device inference via the downloaded local model + ONNX Runtime). Machine-local (the `embedding_*` backup-exclusion rule): the selection is tied to this machine's installed components. Unrecognized values fall back to the default.
 * **`openalex_api_key`**: AES-256-GCM encrypted; raises rate-limit tier. Excluded from backups.
 * **`openalex_mailto`**: Polite-pool email. Portable.
 * **`openalex_retrieve_references`**: Reference + citation harvest toggle (default `false`). Portable.
@@ -345,15 +346,19 @@ A card in the Criteria Editor provides one-click entry: "Search OpenAlex Now" (n
 
 ### 8.6 Embedding-Based Semantic Article Search
 
-Per-article, per-chunk embedding vectors powering bounded cosine-recall semantic search. **Transparent**: no settings card, no audit action, no automatic backfill on upgrade. Feedback is toast-only via the Test Connection probe.
+Per-article, per-chunk embedding vectors powering bounded cosine-recall semantic search. Settings: the Embeddings card (backend selection, local component install/remove - see §8.6.5); no audit action, no automatic backfill on upgrade. Probe feedback surfaces via the Test Connection toast and the Embeddings card.
 
 #### 8.6.1 Capability Probe + Triple-State Flag
 
-A triple-state flag records the provider's embedding capability: `embedding_status` (`unknown` default | `enabled` | `disabled`), `embedding_model`, `embedding_dimensions`. The probe runs during **Test Connection** (after the chat test succeeds) and on the first `generate_embeddings` call when status is `unknown`. Resolution order: (1) Anthropic → `disabled`; (2) try the provider-default embedding model; (3) on failure, retry with the configured chat model; (4) both fail → `disabled`. On success, persists model + dimensions. `save_llm_config` resets to `unknown` so a provider/endpoint/model switch re-evaluates.
+A machine-local backend setting selects the embedding backend per device: `configured_provider` (default; the configured cloud chat provider's embedding API) or `bango_local` (on-device EmbeddingGemma 300M Q4, components downloaded on demand - see §8.6.5). The triple-state flag records capability: `embedding_status` (`unknown` default | `enabled` | `disabled`), `embedding_model`, `embedding_dimensions`.
+
+**Cloud backend probe** (runs during **Test Connection** after the chat test succeeds, and on the first `generate_embeddings` call when status is `unknown`): resolution order (1) Anthropic → `disabled`; (2) try the provider-default embedding model; (3) on failure, retry with the configured chat model; (4) both fail → `disabled`. On success, persists model + dimensions.
+
+**Bango Local backend probe** (same triggers, offline - never touches the cloud provider): installation state check → local engine session load (the self-test) → one probe embed → persists `builtin/embeddinggemma-300m-q4@r1` + 768. A missing/damaged install reports `disabled` with an actionable Settings message. `save_llm_config` resets to `unknown` so a provider/endpoint/model switch re-evaluates; the local backend re-probes offline on the next trigger.
 
 #### 8.6.2 Generation
 
-`generate_embeddings(article_ids?, status_filter?, force?)` — default corpus is `included`. For each article: a `chunk_index = -1` title+abstract row plus one row per `article_chunks` row when `has_full_text = 1`. Per-row staleness tracked by an `input_hash` (SHA-256 of the embedded text); `force` re-embeds everything. The runner dispatches per-article tasks concurrently (bounded by the orchestrator semaphore); the DB mutex is never held across an `.await`. Triggers: post-AI-summary fire-and-forget, rebuild-text-chunks cascade, batch-import Phase 5, and the standalone command.
+`generate_embeddings(article_ids?, status_filter?, force?)` — default corpus is `included`. For each article: a `chunk_index = -1` title+abstract row plus one row per `article_chunks` row when `has_full_text = 1`. Per-row staleness tracked by an `input_hash` (SHA-256 of the embedded text); `force` re-embeds everything. Rows record the generating backend in `provider` (`bango_local` for on-device rows, otherwise the chat-provider identity) and the model identity in `model_name` (`builtin/embeddinggemma-300m-q4@r1` for local rows, so the staleness check covers backend switches). The runner dispatches per-article tasks concurrently (cloud: bounded by the orchestrator semaphore; local: a single on-device session on the blocking pool); the DB mutex is never held across an `.await`. Triggers: post-AI-summary fire-and-forget, rebuild-text-chunks cascade, batch-import Phase 5, and the standalone command.
 
 #### 8.6.3 Recall
 
@@ -362,6 +367,10 @@ A triple-state flag records the provider's embedding capability: `embedding_stat
 #### 8.6.4 Storage
 
 The `article_embeddings` table is keyed on `(article_id, chunk_index)` with `-1` as the title+abstract sentinel. Vectors are little-endian `f32` streams. `ON DELETE CASCADE` on article hard-delete. **Regenerable derived artifact** (see §10.2).
+
+#### 8.6.5 Bango Local (on-device backend)
+
+`bango_local` runs EmbeddingGemma 300M (Q4) fully on-device via ONNX Runtime (CPU; pinned stack: fastembed 7.0.1 → ort 2.0.0-rc.13 → ONNX Runtime 1.30.0, all resolved dynamically at runtime): the model profile + the pinned runtime library are downloaded on demand into the Bango documents directory (OneDrive-aware fallback for the model, app-data cache for the runtime), installed atomically with SHA-256-pinned artifacts, self-tested (session load + probe embed) before the install reports success, and removable from Settings. Retrieval uses the model's asymmetric prompt profile (distinct query/document prefixes). Capability probing is offline (§8.6.1); generation/recall route through the same runner/recall paths with the backend selected per device. Citation Finder is backend-aware: with `bango_local` selected the chat-provider embedding check is skipped, and a search with the components missing prompts contextually — Download and Continue / Use Configured Provider / Cancel. Unsupported machines (Intel macOS) fall back to the configured provider.
 
 ### 8.7 Citation Finder
 
@@ -377,7 +386,7 @@ Paste-prose-to-citations matching over the user's article library, accessed as a
 
 **One-button flow**: `find_citations` is the single entry point. It runs Phase A (readiness) → Phase B (auto-prepare embeddings if coverage < 100%) → Phase C (the search pipeline). No separate "Prepare Embeddings" button.
 
-**Toggle visibility**: the readiness payload carries the raw `embeddingStatus` triple-state + `embeddingModel`. The toggle is clickable when `'enabled'` or `'unknown'`; **visible-but-disabled** when `'disabled'` (known-unsupported provider—amber banner + "Open Settings" link); `'hidden'` only when readiness hasn't loaded or LLM isn't configured. Reacts live to Settings provider switches.
+**Toggle visibility**: the readiness payload carries the raw `embeddingStatus` triple-state + `embeddingModel` (+ `embeddingBackend` / `localReady`, §8.6.5). The toggle is clickable when `'enabled'` or `'unknown'`; **visible-but-disabled** when `'disabled'` (known-unsupported provider—amber banner + "Open Settings" link); `'hidden'` only when readiness hasn't loaded or LLM isn't configured. **Local exception**: with `bango_local` selected and the components not ready, the toggle stays clickable — a submit opens the contextual download prompt (§8.6.5) instead. Reacts live to Settings provider switches.
 
 **Model-mismatch detection**: before each submit, the frontend checks whether stored embeddings were generated with a different model than the current `embedding_model` setting. If so, a confirmation dialog offers: **Regenerate** (scoped delete + re-embed), **Continue anyway** (partial recall), or **Cancel**. Fires once per `storedModel` key per session. The backend's staleness check also flags stale-model rows so Phase B regenerates them on the first run.
 

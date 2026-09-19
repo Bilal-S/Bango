@@ -137,6 +137,8 @@ pub fn run() {
         .manage(ScrapingState::default())
         .manage(CitationFinderState::default())
         .manage(WikiIngestState::default())
+        .manage(std::sync::Arc::new(embedding::local::engine::LocalEngine::new()))
+        .manage(commands::local_embeddings::LocalEmbeddingsInstallState::default())
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
             commands::startup::get_startup_status,
@@ -357,6 +359,13 @@ pub fn run() {
             commands::citation_finder::find_citations,
             commands::citation_finder::cancel_citation_search,
             commands::citation_finder::get_citation_finder_readiness,
+            commands::local_embeddings::get_local_embeddings_status,
+            commands::local_embeddings::install_local_embeddings,
+            commands::local_embeddings::cancel_local_embeddings_install,
+            commands::local_embeddings::verify_local_embeddings,
+            commands::local_embeddings::remove_local_embeddings,
+            commands::local_embeddings::get_embedding_backend,
+            commands::local_embeddings::set_embedding_backend,
         ]);
 
     #[cfg(debug_assertions)]
