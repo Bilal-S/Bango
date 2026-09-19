@@ -2569,7 +2569,7 @@ ER  - </pre>
             </ul>
             <p>
               You can switch between the two at any time in Settings &rarr; Embeddings. The choice
-              applies to this device; switching never changes or deletes your articles.
+              travels with project backups, and switching never changes or deletes your articles.
             </p>
 
             <h3>How Bango Decides</h3>
@@ -2578,7 +2578,8 @@ ER  - </pre>
                 <strong>Configured Provider:</strong> Bango checks whether your provider supports
                 embeddings when you run Test Connection or start your first search. Providers
                 without an embedding API (Anthropic, Z.AI) leave the semantic features unavailable,
-                with a banner pointing you to Settings.
+                with a banner pointing you to Settings; the Embeddings card also disables the
+                Configured Provider option with an inline message for such providers.
               </li>
               <li>
                 <strong>Bango Local:</strong> selecting it the first time shows a consent dialog

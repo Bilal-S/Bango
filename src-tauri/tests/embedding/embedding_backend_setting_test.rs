@@ -51,10 +51,10 @@ fn backend_unknown_value_falls_back_to_default() {
 }
 
 #[test]
-fn backend_key_is_machine_local() {
+fn backend_key_travels_with_project_backup() {
     assert!(
-        !is_project_portable(EMBEDDING_BACKEND_KEY),
-        "embedding_backend must NOT travel with a project backup"
+        is_project_portable(EMBEDDING_BACKEND_KEY),
+        "embedding_backend is a project-level preference and must travel with a project backup"
     );
 }
 

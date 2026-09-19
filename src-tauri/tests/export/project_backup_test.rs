@@ -707,6 +707,15 @@ fn export_import_round_trips_portable_app_settings() {
     // Seed another portable setting (screening mode).
     app_settings_repo::set_screening_mode(&conn, app_settings_repo::ScreeningMode::Enhanced)
         .expect("set screening_mode");
+    // Seed the portable embedding backend preference (bango_local).
+    app_settings_repo::set_embedding_backend(
+        &conn,
+        bango_lib::embedding::backend::EmbeddingBackend::BangoLocal,
+    )
+    .expect("set embedding_backend");
+    // Seed a machine-local embedding setting that must NOT be exported.
+    app_settings_repo::set_embedding_model_override(&conn, Some("text-embedding-3-large"))
+        .expect("set embedding_model_override");
     // Seed a machine-local setting that must NOT be exported.
     app_settings_repo::set_setting(&conn, "storage_root", Some("/tmp/machine-local-path"))
         .expect("set storage_root");
@@ -724,6 +733,14 @@ fn export_import_round_trips_portable_app_settings() {
     assert!(
         keys.contains(&"screening_mode"),
         "portable setting screening_mode must be exported: {keys:?}"
+    );
+    assert!(
+        keys.contains(&"embedding_backend"),
+        "portable setting embedding_backend must be exported: {keys:?}"
+    );
+    assert!(
+        !keys.contains(&"embedding_model_override"),
+        "machine-local embedding_model_override must NOT be exported: {keys:?}"
     );
     assert!(
         !keys.contains(&"storage_root"),
@@ -748,6 +765,17 @@ fn export_import_round_trips_portable_app_settings() {
         restored_mode,
         app_settings_repo::ScreeningMode::Enhanced,
         "screening_mode must round-trip"
+    );
+
+    // The embedding backend preference round-trips (portable): the imported
+    // selection restores verbatim; readiness for it is re-evaluated on the
+    // target machine, never implied by the restore.
+    let restored_backend = app_settings_repo::get_embedding_backend(&conn2)
+        .expect("get_embedding_backend after import");
+    assert_eq!(
+        restored_backend,
+        bango_lib::embedding::backend::EmbeddingBackend::BangoLocal,
+        "embedding_backend must round-trip with the backup"
     );
 
     // The fresh DB's storage_root must NOT have been clobbered by the backup's

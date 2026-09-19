@@ -178,7 +178,8 @@ so a storage-root move cannot orphan an install). Managed state:
 `LocalEmbeddingsInstallState { cancel_token, running }` (AtomicBool pair);
 the shared engine arrives separately as managed `Arc<LocalEngine>` (see
 `embedding/AGENTS.md`). The T6 pair `get_embedding_backend` /
-`set_embedding_backend` read/write the machine-local selection via
+`set_embedding_backend` read/write the project-portable selection (travels
+with backups; readiness stays machine-evaluated) via
 `EmbeddingBackend::parse_exact` (strict command boundary: invalid ids error,
 never fall back) and `set` resets the capability triple to `unknown` so the
 next probe re-evaluates under the new backend (selection never implies

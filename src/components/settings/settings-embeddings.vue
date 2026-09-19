@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { useLlmConfigStore } from '@/stores/llm-config';
 import { useLocalEmbeddings, type EmbeddingBackendId } from '@/composables/use-local-embeddings';
 import EmbeddingsConsentDialog from './embeddings-consent-dialog.vue';
 
@@ -28,6 +29,44 @@ const router = useRouter();
 function openEmbeddingsHelp(): void {
   router.push('/help?tab=reference#ref-embeddings');
 }
+
+const llmConfig = useLlmConfigStore();
+
+/**
+ * Providers with no embedding API - the frontend mirror of the backend's
+ * static `check_embedding_support` override (`src-tauri/src/llm/embedding.rs`).
+ * Keep in sync; keys use the store's serde camelCase provider ids.
+ */
+const EMBEDDING_UNSUPPORTED_PROVIDERS = new Set(['anthropic', 'zAi']);
+
+/** Display labels mirroring the provider card's select options. */
+const PROVIDER_LABELS: Record<string, string> = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  google: 'Google Gemini',
+  mistralAi: 'Mistral AI',
+  zAi: 'Z.AI',
+  llamaCpp: 'llama.cpp',
+  ollama: 'Ollama',
+  lmStudio: 'LM Studio',
+  custom: 'Custom',
+};
+
+/**
+ * The Configured Provider option state, derived LIVE from the currently
+ * selected chat provider (saved or not): the moment the selection in the
+ * provider card switches to a provider without an embedding API, this
+ * disables the option and names that exact provider in the inline message.
+ */
+const selectedProvider = computed(() => llmConfig.config.provider);
+const cloudOptionDisabled = computed(() =>
+  EMBEDDING_UNSUPPORTED_PROVIDERS.has(selectedProvider.value)
+);
+const cloudOptionHint = computed(() =>
+  cloudOptionDisabled.value
+    ? `${PROVIDER_LABELS[selectedProvider.value] ?? selectedProvider.value} does not support embeddings.`
+    : "Uses your AI provider's embedding API (requires an API connection)."
+);
 
 /** Whether the consent dialog is open (pending switch to Bango Local). */
 const showConsent = ref(false);
@@ -202,12 +241,13 @@ async function onRemove(): Promise<void> {
           name="embedding-backend"
           value="configured_provider"
           :checked="backend === 'configured_provider'"
+          :disabled="cloudOptionDisabled"
           @change="onBackendChange('configured_provider')"
         />
         <span class="emb-option__body">
           <span class="emb-option__label">Configured Provider</span>
           <span class="emb-option__hint">
-            Uses your AI provider's embedding API (requires an API connection).
+            {{ cloudOptionHint }}
           </span>
         </span>
       </label>

@@ -21,7 +21,7 @@ use crate::error::AppError;
 use crate::llm::embedding::ProbeOutcome;
 use crate::llm::orchestrator::LlmOrchestrator;
 
-/// The status payload returned by `get_embedding_status` + `probe_embeddings`.
+/// The status payload returned by `get_embedding_status`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EmbeddingStatusInfo {

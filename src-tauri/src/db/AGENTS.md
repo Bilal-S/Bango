@@ -100,11 +100,12 @@ Holds:
   `configured_provider` default | `bango_local` on-device. The
   `EmbeddingBackend` domain type lives in `embedding::backend` (leaf module);
   its `parse` falls back to the default on absent/garbage values so a
-  corrupted row never silently selects the local backend. **Deliberately
-  excluded from `PROJECT_PORTABLE_SETTINGS`** - machine-local: the selection
-  is tied to this machine's installed local-embedding components. Consumed by
-  `embedding::service::EmbeddingService` and read in `embedding::recall`'s
-  lock burst.)
+  corrupted row never silently selects the local backend. **IN
+  `PROJECT_PORTABLE_SETTINGS`**: a project-level preference that travels with
+  backups; readiness for a restored selection is re-evaluated per machine (a
+  restored `bango_local` without components hits the contextual install
+  prompt). Consumed by `embedding::service::EmbeddingService` and read in
+  `embedding::recall`'s lock burst.)
 - `project_name` (optional plaintext, up to `PROJECT_NAME_MAX_LEN = 60` chars;
   user-editable Dashboard title. `set_project_name` trims + hard-caps via
   `chars().take(50)`; empty/whitespace-only stores NULL. **Included in

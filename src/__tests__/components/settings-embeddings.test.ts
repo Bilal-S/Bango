@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createRouter, createMemoryHistory } from 'vue-router';
+import { createPinia, setActivePinia } from 'pinia';
+import { useLlmConfigStore } from '@/stores/llm-config';
 
 // Mock the composable so the component's branch logic (consent gating,
 // repair banner, install actions) is testable without IPC. The factory
@@ -77,11 +79,20 @@ function makeRouter() {
 }
 
 async function mountCard(router = makeRouter()) {
+  const pinia = createPinia();
+  setActivePinia(pinia);
   const wrapper = mount(SettingsEmbeddings, {
-    global: { plugins: [router], stubs: { teleports: true } },
+    global: { plugins: [pinia, router], stubs: { teleports: true } },
   });
   await flushPromises();
   return { wrapper, router };
+}
+
+/** The Configured Provider radio input (or undefined when absent). */
+function cloudRadio(wrapper: Awaited<ReturnType<typeof mountCard>>['wrapper']) {
+  return wrapper
+    .findAll('input[type="radio"]')
+    .find((r) => (r.element as HTMLInputElement).value === 'configured_provider');
 }
 
 beforeEach(() => {
@@ -225,5 +236,57 @@ describe('settings-embeddings consent gating', () => {
     resolveSelect();
     await flushPromises();
     expect((fieldset().element as HTMLFieldSetElement).disabled).toBe(false);
+  });
+});
+
+describe('settings-embeddings configured-provider capability', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api().backend.value = 'configured_provider';
+    api().status.value = NOT_INSTALLED;
+    api().error.value = null;
+    api().installing.value = false;
+  });
+
+  it('disables_the_configured_provider_option_with_a_message_for_unsupported_providers', async () => {
+    const { wrapper } = await mountCard();
+    useLlmConfigStore().config.provider = 'anthropic';
+    await flushPromises();
+    const cloud = cloudRadio(wrapper)!;
+    const local = wrapper
+      .findAll('input[type="radio"]')
+      .find((r) => (r.element as HTMLInputElement).value === 'bango_local')!;
+    expect((cloud.element as HTMLInputElement).disabled).toBe(true);
+    expect((local.element as HTMLInputElement).disabled).toBe(false);
+    expect(wrapper.text()).toContain('Anthropic does not support embeddings.');
+  });
+
+  it('keeps_the_option_enabled_for_supported_providers', async () => {
+    const { wrapper } = await mountCard();
+    useLlmConfigStore().config.provider = 'openai';
+    await flushPromises();
+    const cloud = cloudRadio(wrapper)!;
+    expect((cloud.element as HTMLInputElement).disabled).toBe(false);
+    expect(wrapper.text()).toContain("Uses your AI provider's embedding API");
+  });
+
+  it('names_the_newly_selected_provider_the_moment_it_changes', async () => {
+    const { wrapper } = await mountCard();
+    useLlmConfigStore().config.provider = 'openai';
+    await flushPromises();
+    expect((cloudRadio(wrapper)!.element as HTMLInputElement).disabled).toBe(false);
+
+    // Switching the provider selection (even before saving) reflects
+    // instantly: disabled + the exact provider named.
+    useLlmConfigStore().config.provider = 'zAi';
+    await flushPromises();
+    expect((cloudRadio(wrapper)!.element as HTMLInputElement).disabled).toBe(true);
+    expect(wrapper.text()).toContain('Z.AI does not support embeddings.');
+
+    // Back to a supported provider: re-enabled with the normal hint.
+    useLlmConfigStore().config.provider = 'openai';
+    await flushPromises();
+    expect((cloudRadio(wrapper)!.element as HTMLInputElement).disabled).toBe(false);
+    expect(wrapper.text()).toContain("Uses your AI provider's embedding API");
   });
 });

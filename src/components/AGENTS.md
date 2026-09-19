@@ -228,7 +228,13 @@ description is one non-technical sentence + `Learn more` link to Help
 Reference `#ref-embeddings` (`.settings-card__learn-more` chrome lives in
 `settings-card-shared.css`; the processing-location explanation lives in
 the Help Reference `Embeddings` section below `Backup & Restore`, not in
-the card); state via `useLocalEmbeddings()`, see
+the card); the Configured Provider radio disables with an inline
+"`{provider}` does not support embeddings." message derived LIVE from the
+llm-config store's currently selected provider (saved or not - the name
+always matches the selection the instant it changes). The unsupported set
+(`anthropic`, `zAi`) + label map are frontend mirrors of the backend's
+static `check_embedding_support` override and the provider card's select
+labels - keep in sync; state via `useLocalEmbeddings()`, see
 `composables/AGENTS.md`),
 `settings-screening-preferences.vue`, `settings-storage.vue`,
 `settings-reprocessing.vue` (owns the chunk-rebuild progress widget: live

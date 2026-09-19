@@ -466,9 +466,10 @@ pub fn set_embedding_model_override(
 /// embedding API; `bango_local` runs on-device inference via the downloaded
 /// model + ONNX Runtime. The domain type lives in `embedding::backend` (the
 /// service router owns it); this repo owns only the key's persistence.
-/// Machine-local - excluded from `PROJECT_PORTABLE_SETTINGS` per the spec
-/// §8.1 `embedding_*` rule: the selection is tied to this machine's
-/// installed components.
+/// Project-portable: the preference travels with a project backup (an
+/// imported selection never implies readiness - probes and component health
+/// stay machine-evaluated, and a restored `bango_local` on a machine without
+/// components hits the existing install prompt).
 pub const EMBEDDING_BACKEND_KEY: &str = "embedding_backend";
 
 /// Read the embedding backend selection. Defaults to `ConfiguredProvider`.
@@ -521,8 +522,10 @@ pub fn set_project_name(conn: &Connection, value: &str) -> Result<(), AppError> 
 /// The subset of `app_settings` keys that travel with a project backup.
 /// Explicitly excluded: `storage_root`, `flag_premium`, `*_needs_refresh`,
 /// `wiki_dir_hash`, `fulltext_storage_dir` (legacy), `embedding_model_override`,
-/// `embedding_backend` (machine-local: tied to this machine's installed
-/// local-embedding components).
+/// and the embedding capability triple (`embedding_status` /
+/// `embedding_model` / `embedding_dimensions`) - all machine-local.
+/// `embedding_backend` DOES travel: it is a project-level preference, and
+/// readiness for the restored selection is re-evaluated per machine.
 pub const PROJECT_PORTABLE_SETTINGS: &[&str] = &[
     SCREENING_CUSTOM_LOGIC_KEY,
     AUTO_TRANSLATE_KEY,
@@ -536,6 +539,7 @@ pub const PROJECT_PORTABLE_SETTINGS: &[&str] = &[
     TWO_STAGE_EXPECTED_BORDERLINE_FRACTION_KEY,
     "openalex_mailto",
     "openalex_retrieve_references",
+    EMBEDDING_BACKEND_KEY,
     PROJECT_NAME_KEY,
 ];
 

@@ -40,7 +40,7 @@ or explicitly with `-- --ignored` plus their documented env-var artifacts.
 | `src-tauri/tests/embedding/embedding_backend_setting_test.rs::backend_defaults_to_configured_provider` | Fresh DB reads the cloud backend |
 | `src-tauri/tests/embedding/embedding_backend_setting_test.rs::backend_round_trips_bango_local` | Set/get round-trips the local backend |
 | `src-tauri/tests/embedding/embedding_backend_setting_test.rs::backend_unknown_value_falls_back_to_default` | Garbage stored values fall back to the cloud backend |
-| `src-tauri/tests/embedding/embedding_backend_setting_test.rs::backend_key_is_machine_local` | The key is excluded from `PROJECT_PORTABLE_SETTINGS` |
+| `src-tauri/tests/embedding/embedding_backend_setting_test.rs::backend_key_travels_with_project_backup` | The key is IN `PROJECT_PORTABLE_SETTINGS` (project-level preference; readiness re-evaluated per machine) |
 | `src-tauri/tests/embedding/embedding_service_test.rs::service_cloud_query_routes_through_orchestrator` | Cloud backend + Query role reaches the provider endpoint and parses vectors |
 | `src-tauri/tests/embedding/embedding_service_test.rs::service_cloud_documents_route_through_orchestrator` | Cloud backend + Document role reaches the same endpoint |
 | `src-tauri/tests/embedding/embedding_service_test.rs::service_local_not_installed_returns_actionable_error` | Local backend without installation errors naming Settings |
@@ -123,6 +123,9 @@ or explicitly with `-- --ignored` plus their documented env-var artifacts.
 | `src/__tests__/components/settings-embeddings.test.ts::manual_download_installs_directly_when_local_selected` | With local selected (consent already given) the Download installs directly |
 | `src/__tests__/components/settings-embeddings.test.ts::card_describes_what_embeddings_do_and_links_to_the_help_section` | The card description is one non-technical sentence + a Learn-more link routing to `/help?tab=reference#ref-embeddings`; the in-card privacy table is gone |
 | `src/__tests__/components/settings-embeddings.test.ts::radios_disable_while_a_backend_switch_is_in_flight` | The provider radios disable while `selectBackend` persists (no double-fire during the off-thread session reset) |
+| `src/__tests__/components/settings-embeddings.test.ts::disables_the_configured_provider_option_with_a_message_for_unsupported_providers` | Selecting Anthropic disables the Configured Provider radio and shows the inline message naming it; Bango Local stays enabled |
+| `src/__tests__/components/settings-embeddings.test.ts::keeps_the_option_enabled_for_supported_providers` | A supported provider keeps the option enabled with the normal hint |
+| `src/__tests__/components/settings-embeddings.test.ts::names_the_newly_selected_provider_the_moment_it_changes` | The message names the exact newly selected provider instantly (unsaved selection included) and re-enables when it switches back |
 | `src/__tests__/components/citation-local-embeddings-dialog.test.ts::hides_use_configured_provider_when_the_chat_provider_cannot_embed` | The option hides with an explanation for providers without embedding APIs; the license line shows regardless |
 | `src-tauri/tests/citation_finder/citation_finder_readiness_test.rs::compute_readiness_bango_local_ready_passes_gate_despite_stale_disabled` | The local Phase A gate tracks actual readiness, not the persisted disabled triple |
 | `src-tauri/tests/embedding/embedding_component_test.rs::runtime_extract_zip_matches_dot_prefixed_members` | Zip `./`-prefix parity with the tar member matching |

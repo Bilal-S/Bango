@@ -23,7 +23,9 @@ Exports source tables (aims, criteria, articles, tags, labels,
 article_tags/labels, audit, reference_papers, article_reference_links,
 llm_config) plus a curated project-portable subset of `app_settings` (see
 `db/app_settings_repo.rs`: `screening_custom_logic`, `summary_evidence_mode`,
-`auto_translate`, screening-mode + enhanced/two-stage params). The
+`auto_translate`, screening-mode + enhanced/two-stage params,
+`embedding_backend` - a project-level preference whose readiness is
+re-evaluated per machine). The
 `appSettings` field is `#[serde(default)]` so old backups without it import
 cleanly. Only allowlisted keys are exported/imported (defense-in-depth via
 `is_project_portable`); machine-local state (`storage_root`, `flag_premium`,
