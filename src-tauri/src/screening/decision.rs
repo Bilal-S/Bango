@@ -69,6 +69,21 @@ pub fn resolve_article_decision(
         })
         .collect();
 
+    /* Failed-inclusion matches drive the resolver's failed-inclusion guard:
+    an unmet inclusion that outranks every satisfied inclusion forces
+    exclude, so a self-contradicting LLM `include` cannot bypass the review
+    definition. Built before `failed_inc` is consumed by the stored-array
+    merge below. */
+    let failed_matches: Vec<CriterionMatch> = failed_inc
+        .iter()
+        .filter_map(|key| criteria.iter().find(|c| c.id == *key))
+        .map(|c| CriterionMatch {
+            id: c.id.clone(),
+            criterion_type: c.criterion_type.clone(),
+            priority: c.priority,
+        })
+        .collect();
+
     // Collect auto-label info before matches are moved into resolution.
     let auto_label_criteria: Vec<(String, String)> = inc_matches
         .iter()
@@ -93,8 +108,12 @@ pub fn resolve_article_decision(
         exclusion_matches: exc_matches,
     };
     // Custom logic: LLM decision final; priority resolver not applied.
-    let final_decision =
-        resolution::finalize_decision(&screening.decision, &resolution_input, has_custom_logic);
+    let final_decision = resolution::finalize_decision_with_failed(
+        &screening.decision,
+        &resolution_input,
+        &failed_matches,
+        has_custom_logic,
+    );
 
     /* Augment matched arrays with criteria UUIDs mentioned in reasoning
     but missing from the resolved matched arrays. */
@@ -109,8 +128,9 @@ pub fn resolve_article_decision(
 
     /* Failed inclusion criteria (required but not met) merge into the stored
     exclusion array - implicit cross-type storage, resolved by criterion type
-    at display/report time. They never join `inc_matches`/`exc_matches`, so
-    they cannot influence the priority resolver or generate auto-labels. */
+    at display/report time. They never join `inc_matches`/`exc_matches` (so
+    they generate no auto-labels); their decision influence is the dedicated
+    failed-inclusion guard in `resolve_decision_with_failed`. */
     for id in failed_inc {
         if !augmented_exc.contains(&id) {
             augmented_exc.push(id);

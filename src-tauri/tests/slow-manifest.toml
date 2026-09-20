@@ -15,11 +15,28 @@
 [[area]]
 name = "llm"
 # src/commands/bango_ai.rs lands at T5; forward-referenced so slow gating is correct from day one.
-paths = ["src/llm/**", "src/models/llm_config*", "src/local_ai/**", "src/commands/bango_ai.rs"]
+# The structured-response guard tests also exercise the screening/figure/consumer
+# prompt+parser files, so those exact files are listed too.
+paths = [
+    "src/llm/**",
+    "src/models/llm_config*",
+    "src/local_ai/**",
+    "src/commands/bango_ai.rs",
+    "src/screening/prompt.rs",
+    "src/screening/json_parse.rs",
+    "src/screening/engine/mod.rs",
+    "src/summary/prompt.rs",
+    "src/commands/criteria.rs",
+    "src/commands/search_strategy.rs",
+    "src/openalex/smart_search.rs",
+]
 tests = [
     "bango_ai_live_test::bango_ai_runtime_install_and_version",
-    "bango_ai_live_test::bango_ai_ornith_acceptance_smoke",
+    "bango_ai_live_test::bango_ai_acceptance_smoke",
     "bango_ai_live_test::bango_ai_engine_idle_stop_with_override",
+    "bango_ai_live_test::bango_ai_screening_prompt_parses_under_json_object_grammar",
+    "bango_ai_live_test::bango_ai_figure_description_prompt_parses_under_json_object_grammar",
+    "bango_ai_live_test::bango_ai_structured_consumers_parse_under_json_object_grammar",
     "llm_orchestrator_test::test_connection_fails_on_unreachable_endpoint",
     "llm_orchestrator_test::concurrent_sends_do_not_deadlock",
     "llm_orchestrator_test::concurrent_sends_with_delay_do_not_deadlock",

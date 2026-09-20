@@ -13,8 +13,10 @@ pub const LARGE_RAM_THRESHOLD_MB: u64 = 24 * 1024;
 /// trains to 256k; the 64k KV cache is roughly 10 GB for this 9B).
 pub const XLARGE_RAM_THRESHOLD_MB: u64 = 48 * 1024;
 
-/// Maximum generation threads (leaves headroom beyond the reserved cores).
-pub const MAX_LLM_THREADS: usize = 8;
+/// Maximum generation threads. The small pinned model is memory-bandwidth
+/// bound, so more threads keep helping up to 12; the UI/SQLite reserve is
+/// already subtracted by `llm_thread_budget`.
+pub const MAX_LLM_THREADS: usize = 12;
 
 /// Cores reserved for the UI, async runtime, and SQLite.
 pub const RESERVED_CORES: usize = 2;
@@ -92,11 +94,12 @@ mod tests {
     }
 
     #[test]
-    fn thread_budget_uses_cores_minus_two_capped_at_eight() {
+    fn thread_budget_uses_cores_minus_two_capped_at_twelve() {
         assert_eq!(llm_thread_budget(1), 1);
         assert_eq!(llm_thread_budget(2), 1);
         assert_eq!(llm_thread_budget(4), 2);
         assert_eq!(llm_thread_budget(10), 8);
-        assert_eq!(llm_thread_budget(32), 8);
+        assert_eq!(llm_thread_budget(14), 12);
+        assert_eq!(llm_thread_budget(32), 12);
     }
 }

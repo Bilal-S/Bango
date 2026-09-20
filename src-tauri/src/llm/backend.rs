@@ -13,7 +13,7 @@ pub enum LlmBackend {
     #[default]
     ConfiguredProvider,
     /// Bango AI: on-device inference via the downloaded llama.cpp runtime and
-    /// Ornith model.
+    /// Qwen3.5 model.
     BangoAi,
 }
 

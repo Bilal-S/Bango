@@ -10,6 +10,10 @@ macro_rules! debug_log {
     };
 }
 
+/// Wrapper keys a local `json_object` response may use for the results array.
+/// The prompt requests `results`; the rest are resilience for model drift.
+const WRAPPER_KEYS: &[&str] = &["results", "result", "screenings", "data", "articles"];
+
 /// Parse the LLM response as a JSON array of screening results.
 pub fn process_screening_responses(raw: &str) -> Result<Vec<LlmScreeningResponse>, AppError> {
     debug_log!("[screening] process_screening_responses received {} bytes", raw.len());
@@ -25,26 +29,7 @@ pub fn process_screening_responses(raw: &str) -> Result<Vec<LlmScreeningResponse
 
     match serde_json::from_str::<Vec<LlmScreeningResponse>>(&json_str) {
         Ok(mut results) => {
-            // M9: Validate and normalize LLM decision values
-            for r in &mut results {
-                let d = r.decision.to_lowercase();
-                match d.as_str() {
-                    "include" | "exclude" | "error" => {
-                        r.decision = d;
-                    }
-                    _ => {
-                        debug_log!(
-                            "[screening] Unexpected decision '{}', treating as error",
-                            r.decision
-                        );
-                        r.reasoning = format!(
-                            "Unexpected LLM decision: '{}'. Original reasoning: {}",
-                            r.decision, r.reasoning
-                        );
-                        r.decision = "error".to_string();
-                    }
-                }
-            }
+            normalize_decisions(&mut results);
             debug_log!("[screening] successfully parsed {} screening results", results.len());
             Ok(results)
         }
@@ -55,27 +40,34 @@ pub fn process_screening_responses(raw: &str) -> Result<Vec<LlmScreeningResponse
                 &json_str[..json_str.len().min(500)]
             );
 
+            /* Object-root recovery: llama.cpp's `response_format: json_object`
+            grammar cannot emit a bare top-level array, so local responses are
+            always an object (flat single decision, numeric-key map, or a
+            wrapper key). Cloud bare arrays never reach here (they parse
+            above). */
+            if let Some(resolved) = resolve_screening_array(&json_str) {
+                debug_log!("[screening] attempting object-shape recovery...");
+                match serde_json::from_value::<Vec<LlmScreeningResponse>>(resolved) {
+                    Ok(mut results) => {
+                        normalize_decisions(&mut results);
+                        debug_log!(
+                            "[screening] object-shape recovery succeeded! Recovered {} results",
+                            results.len()
+                        );
+                        return Ok(results);
+                    }
+                    Err(recovery_err) => {
+                        debug_log!("[screening] object-shape recovery failed: {recovery_err}");
+                    }
+                }
+            }
+
             // Try truncated JSON repair: find last complete `}` and add missing `]`
             if let Some(repaired) = repair_truncated_json_array(&json_str) {
                 debug_log!("[screening] attempting truncated JSON repair...");
                 match serde_json::from_str::<Vec<LlmScreeningResponse>>(&repaired) {
                     Ok(mut results) => {
-                        // M9: Validate repaired results too
-                        for r in &mut results {
-                            let d = r.decision.to_lowercase();
-                            match d.as_str() {
-                                "include" | "exclude" | "error" => {
-                                    r.decision = d;
-                                }
-                                _ => {
-                                    r.reasoning = format!(
-                                        "Unexpected LLM decision: '{}'. Original reasoning: {}",
-                                        r.decision, r.reasoning
-                                    );
-                                    r.decision = "error".to_string();
-                                }
-                            }
-                        }
+                        normalize_decisions(&mut results);
                         debug_log!(
                             "[screening] repair succeeded! Recovered {} results",
                             results.len()
@@ -89,6 +81,78 @@ pub fn process_screening_responses(raw: &str) -> Result<Vec<LlmScreeningResponse
             }
 
             Err(AppError::Import(format!("Malformed LLM response: {e}")))
+        }
+    }
+}
+
+/// Resolve an object-root screening response to its results array.
+///
+/// Recovery order:
+/// 1. a known wrapper key holding an array (`results`, `result`, ...);
+/// 2. a flat single decision object (has `decision`) as a one-element array;
+/// 3. a numeric-key map (`{"0": {...}, "1": {...}}`) in numeric key order;
+/// 4. the first array-of-objects property (model-invented wrapper).
+///
+/// Returns `None` when nothing array-shaped is recoverable, so the caller
+/// surfaces the original parse error instead of silently returning no results.
+#[must_use]
+pub fn resolve_screening_array(json_str: &str) -> Option<serde_json::Value> {
+    let value: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    if value.is_array() {
+        return Some(value);
+    }
+    let obj = value.as_object()?;
+
+    for key in WRAPPER_KEYS {
+        if let Some(inner) = obj.get(*key) {
+            if inner.is_array() {
+                return Some(inner.clone());
+            }
+        }
+    }
+
+    if obj.contains_key("decision") {
+        return Some(serde_json::Value::Array(vec![value]));
+    }
+
+    if !obj.is_empty() && obj.keys().all(|k| k.parse::<usize>().is_ok()) {
+        let mut numeric: Vec<(usize, &serde_json::Value)> =
+            obj.iter().filter_map(|(k, v)| k.parse::<usize>().ok().map(|i| (i, v))).collect();
+        numeric.sort_by_key(|(i, _)| *i);
+        if numeric.iter().all(|(_, v)| v.is_object()) {
+            return Some(serde_json::Value::Array(
+                numeric.into_iter().map(|(_, v)| v.clone()).collect(),
+            ));
+        }
+    }
+
+    for inner in obj.values() {
+        if let Some(arr) = inner.as_array() {
+            if arr.first().is_some_and(serde_json::Value::is_object) {
+                return Some(inner.clone());
+            }
+        }
+    }
+
+    None
+}
+
+/// M9: validate + normalize LLM decision values in place.
+fn normalize_decisions(results: &mut [LlmScreeningResponse]) {
+    for r in results {
+        let d = r.decision.to_lowercase();
+        match d.as_str() {
+            "include" | "exclude" | "error" => {
+                r.decision = d;
+            }
+            _ => {
+                debug_log!("[screening] Unexpected decision '{}', treating as error", r.decision);
+                r.reasoning = format!(
+                    "Unexpected LLM decision: '{}'. Original reasoning: {}",
+                    r.decision, r.reasoning
+                );
+                r.decision = "error".to_string();
+            }
         }
     }
 }

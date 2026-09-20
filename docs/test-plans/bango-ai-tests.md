@@ -23,7 +23,7 @@ marker in the test file identifies un-implemented rows.
 | `src-tauri/src/llm/local/hardware.rs::verdict_warns_below_ram_floor_and_without_avx2` | Warning reasons are reported without blocking |
 | `src-tauri/src/llm/local/hardware.rs::verdict_unsupported_without_disk_headroom_or_target` | Unsupported reasons are fatal only for disk and target |
 | `src-tauri/src/llm/local/policy.rs::context_default_follows_total_ram` | 16k below 24 GB and 32k at or above it, clamps to allowed values |
-| `src-tauri/src/llm/local/policy.rs::thread_budget_uses_cores_minus_two_capped_at_eight` | Floor 1, ceiling 8, independent of the embedding cap |
+| `src-tauri/src/llm/local/policy.rs::thread_budget_uses_cores_minus_two_capped_at_twelve` | Floor 1, ceiling 12, independent of the embedding cap |
 | `src-tauri/src/llm/local/manifest.rs::bango_ai_manifest_pins_runtime_and_model_files` | Profile id, URLs, sizes, and hashes parse and validate |
 | `src-tauri/tests/db/app_settings_llm_backend_test.rs::llm_backend_round_trips_and_defaults` | Missing/garbage values read as configured_provider; stored values round-trip |
 | `src-tauri/tests/db/app_settings_llm_backend_test.rs::llm_backend_travels_with_project_backup` | Portable export/import carries the selection; engine settings stay machine-local |
@@ -104,5 +104,8 @@ marker in the test file identifies un-implemented rows.
 
 | Test | Assertion |
 |---|---|
-| `src-tauri/tests/llm/bango_ai_live_test.rs::bango_ai_ornith_acceptance_smoke` | Live (slow, network): installs pinned runtime + Ornith Q4_K_M, starts the engine, runs a real screening JSON prompt and a summary prompt, asserts parseable JSON, thinking-off behavior, and prints first-token/tokens-per-second/RAM observations |
+| `src-tauri/tests/llm/bango_ai_live_test.rs::bango_ai_acceptance_smoke` | Live (slow, network): installs pinned runtime + Qwen3.5-2B UD-Q4_K_XL, starts the engine, runs a real screening JSON prompt and a summary prompt, asserts parseable JSON, thinking-off behavior, and prints first-token/tokens-per-second/RAM observations |
 | `src-tauri/tests/llm/bango_ai_live_test.rs::bango_ai_engine_idle_stop_with_override` | Live (slow): the debug idle override puts the server to sleep (native sleep primary, kill fallback per T4); resident memory (RSS) is printed as an observation, not hard-asserted |
+| `src-tauri/tests/llm/bango_ai_live_test.rs::bango_ai_screening_prompt_parses_under_json_object_grammar` | Live (slow, installed components): the real screening prompt (1 article) through the engine with `response_format: json_object` parses via `process_screening_responses` (skips when components are not installed) |
+| `src-tauri/tests/llm/bango_ai_live_test.rs::bango_ai_figure_description_prompt_parses_under_json_object_grammar` | Live (slow, installed components): the real figure-description prompt parses via `parse_figure_descriptions_response` under the local grammar (skips when components are not installed) |
+| `src-tauri/tests/llm/bango_ai_live_test.rs::bango_ai_structured_consumers_parse_under_json_object_grammar` | Live (slow, installed components): search-strategy and OpenAlex smart-search real prompts parse via their typed parsers under the local grammar (skips when components are not installed) |

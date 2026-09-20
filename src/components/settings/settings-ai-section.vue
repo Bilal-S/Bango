@@ -17,7 +17,7 @@ const { backend, status, switching, installing, error, load, selectBackend, inst
 
 const showConsent = ref(false);
 
-const consentModel = computed(() => status.value?.model ?? 'Ornith 1.5 9B');
+const consentModel = computed(() => status.value?.model ?? 'Qwen3.5 2B');
 const consentBytes = computed(() => status.value?.downloadBytes ?? 0);
 const consentLicense = computed(() => status.value?.license ?? 'MIT');
 const consentLicenseUrl = computed(() => status.value?.licenseUrl ?? '');

@@ -16,11 +16,40 @@ pub struct ScreeningInput {
 }
 
 /// Deterministic priority conflict resolution:
-/// 1. Highest-priority inclusion vs exclusion wins.
-/// 2. Tie = favor inclusion. No criteria = exclude.
+/// 1. A failed inclusion that outranks every satisfied inclusion wins (exclude).
+/// 2. Highest-priority inclusion vs exclusion wins.
+/// 3. Tie = favor inclusion. No criteria = exclude.
 #[must_use]
 pub fn resolve_decision(input: &ScreeningInput) -> &'static str {
+    resolve_decision_with_failed(input, &[])
+}
+
+/// `resolve_decision` with the LLM's FAILED-inclusion list.
+///
+/// Small models can self-contradict: the decision field says `include` while
+/// the matched arrays mark a high-priority inclusion criterion as not met
+/// (the "West-Germany" live case: UK geography failed, a standard inclusion
+/// satisfied, decision `include`). When the failed inclusion strictly
+/// outranks every satisfied inclusion the article cannot be included, so the
+/// engine forces `exclude`; equal priority keeps the tie-favors-inclusion
+/// rule. The LIST is the validated failed set, never raw LLM keys (junk and
+/// exclusion-type keys never reach here).
+#[must_use]
+pub fn resolve_decision_with_failed(
+    input: &ScreeningInput,
+    failed_inclusions: &[CriterionMatch],
+) -> &'static str {
     let highest_inclusion = input.inclusion_matches.iter().max_by_key(|m| m.priority);
+
+    if let Some(failed) = failed_inclusions.iter().max_by_key(|m| m.priority) {
+        let outranks_satisfied = match highest_inclusion {
+            Some(inc) => failed.priority > inc.priority,
+            None => true,
+        };
+        if outranks_satisfied {
+            return "exclude";
+        }
+    }
 
     let highest_exclusion = input.exclusion_matches.iter().max_by_key(|m| m.priority);
 
@@ -47,9 +76,22 @@ pub fn finalize_decision<'a>(
     input: &ScreeningInput,
     has_custom_logic: bool,
 ) -> &'a str {
+    finalize_decision_with_failed(llm_decision, input, &[], has_custom_logic)
+}
+
+/// `finalize_decision` with the LLM's validated FAILED-inclusion list.
+/// Custom logic still suppresses the guard: combinatorial rules are the
+/// supreme authority and their decision is final.
+#[must_use]
+pub fn finalize_decision_with_failed<'a>(
+    llm_decision: &'a str,
+    input: &ScreeningInput,
+    failed_inclusions: &[CriterionMatch],
+    has_custom_logic: bool,
+) -> &'a str {
     if has_custom_logic {
         llm_decision
     } else {
-        resolve_decision(input)
+        resolve_decision_with_failed(input, failed_inclusions)
     }
 }

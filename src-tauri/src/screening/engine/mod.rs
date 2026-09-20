@@ -609,18 +609,17 @@ impl ScreeningEngine {
                     self.emit_progress(&app_handle, &progress);
                 }
                 Err(parse_err) => {
+                    /* `process_screening_responses` already returns
+                    "Malformed LLM response: ...", so strip the AppError
+                    Display's "Import error: " prefix instead of nesting a
+                    second copy of the same message. */
+                    let raw_msg = parse_err.to_string();
+                    let parse_msg =
+                        raw_msg.strip_prefix("Import error: ").unwrap_or(&raw_msg).to_string();
                     {
                         let c = crate::db::connection::lock_conn(conn_mutex)?;
-                        mark_batch_screening_error(
-                            &c,
-                            &batch,
-                            &format!("Malformed LLM response: {parse_err}"),
-                            Some(&response_text),
-                        )?;
-                        let _ = audit_repo::log_error(
-                            &c,
-                            &format!("Malformed LLM response: {parse_err}"),
-                        );
+                        mark_batch_screening_error(&c, &batch, &parse_msg, Some(&response_text))?;
+                        let _ = audit_repo::log_error(&c, &parse_msg);
                     }
                     let mut progress = self.progress.lock().await;
                     progress.errors += batch.len();

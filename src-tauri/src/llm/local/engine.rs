@@ -61,6 +61,15 @@ const IN_FLIGHT_DRAIN_POLL: Duration = Duration::from_millis(25);
 /// 1800 s wall-clock budget (`orchestrator::LOCAL_TIMEOUT_SECS`).
 const LOCAL_DRAIN_MAX: Duration = Duration::from_secs(crate::llm::orchestrator::LOCAL_TIMEOUT_SECS);
 
+/// Logical prompt batch (`--batch-size`). llama.cpp defaults to 2048; 1024
+/// keeps prefill chunks aligned with the physical batch without over-allocating
+/// compute buffers on 16 GB machines.
+const LLM_BATCH_SIZE: usize = 1024;
+
+/// Physical prompt batch (`--ubatch-size`). The b10964 default is 512; 1024
+/// improves CPU prompt-eval throughput (measured in the T4/Qwen spike).
+const LLM_UBATCH_SIZE: usize = 1024;
+
 /// Server state as reported to the command layer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EngineState {
@@ -538,6 +547,12 @@ fn build_args(
         settings.threads.to_string(),
         "--threads-batch".to_string(),
         settings.threads.to_string(),
+        "--batch-size".to_string(),
+        LLM_BATCH_SIZE.to_string(),
+        "--ubatch-size".to_string(),
+        LLM_UBATCH_SIZE.to_string(),
+        "--flash-attn".to_string(),
+        "on".to_string(),
         "--no-webui".to_string(),
         "--jinja".to_string(),
         "--api-key".to_string(),

@@ -293,19 +293,30 @@ OpenAI-compatible). Routing an OpenAI-shaped body to
   `db::app_settings_repo::LLM_BACKEND_KEY` (project-portable; readiness stays
   machine-evaluated).
 - `local/profile.rs` pins the profile identity
-  (`builtin/ornith-1.5-9b-q4km@r1`), the model file name, the runtime
+  (`builtin/qwen3.5-2b-ud-q4kxl@r1`), the model file name, the runtime
   directory (`llama.cpp`), the engine label, and the platform server binary
   name.
 - `local/policy.rs` owns the RAM-aware context default (16k below 24 GB, 32k
-  at or above), context clamping to 8k/16k/32k, and the generation thread
-  budget (`cores - 2`, floor 1, ceiling 8).
+  at or above), context clamping to 8k/16k/32k/64k, and the generation thread
+  budget (`cores - 2`, floor 1, ceiling 12).
 - `local/hardware.rs` owns `HardwareProfile` / `HardwareVerdict` / `assess`
   (unsupported = target or disk; warning = RAM floors or missing AVX2) plus
   the `sysinfo`-backed `detect()`.
-- `local/manifest.rs` pins Ornith-1.5-9B Q4_K_M (MIT, commit-pinned) and the
-  llama.cpp `b10964` runtime archives with member/alias sets enumerated from
-  the real archives during the T4 spike; shared scheme/hash/disk-math
-  primitives come from `local_ai`.
+  The AVX2 probe must live in two `#[cfg(...)]` expression blocks
+  (`any(target_arch = "x86", target_arch = "x86_64")` plus the `not(...)`
+  complement).
+  Never guard it with a `cfg!()` runtime `if`: `is_x86_feature_detected!`
+  still expands on ARM targets and breaks the macOS release build
+  (regression: the aarch64 `macos-latest` CI job failed compiling exactly
+  this macro before the cfg-block fix).
+- `local/manifest.rs` pins Qwen3.5-2B UD-Q4_K_XL (Apache-2.0, commit-pinned
+  unsloth dynamic quant of `Qwen/Qwen3.5-2B`; the previous Ornith-1.5-9B pin
+  is kept as a comment for revert) and the llama.cpp `b10964` runtime
+  archives with member/alias sets enumerated from the real archives during
+  the T4 spike; shared scheme/hash/disk-math primitives come from `local_ai`.
+  The engine spawns with `--flash-attn on`, `--batch-size 1024`, and
+  `--ubatch-size 1024` (validated against the pinned runtime), and threads
+  default to `cores - 2` capped at 12.
 - `local/install.rs` owns the runtime/model assessment, full verification,
   the runtime-first bundle install (idempotent, shared downloader + promote),
   the model-profile install, and combined removal (locked Windows trees are
@@ -353,6 +364,11 @@ OpenAI-compatible). Routing an OpenAI-shaped body to
 - **Contract**: JSON-returning LLM consumers (article summary, section summary, figure descriptions, criteria generation, OpenAlex smart search, search strategy, unified summary) MUST use `send_json`. The response `String` is ready for `serde_json::from_str` without any further cleanup.
 - **Prose callers** (chat, wiki chat, literature review, wiki ingest, markdown-fallback retry, translation) MUST use `send` instead - running the JSON pre-parser on prose would corrupt quoted spans.
 - **Screening** uses `send` (not `send_json`) because its `extract_json` does array-specific shape repair that the generic pre-parser cannot handle; the screening path runs `prepare_llm_json` as the first step inside `screening::engine::extract_json` instead.
+- **Local `json_object` grammars cannot emit a bare top-level array** (`response_format` engages only on the `bango_ai` path; cloud transports never see the field). Every local structured consumer must therefore request an object wrapper AND tolerate the observed object shapes:
+  - Screening (`screening/prompt.rs` + `json_parse.rs`): the prompt requests `{"results": [...]}`; `process_screening_responses` recovers a wrapper key, a flat single decision object, a numeric-key map (`{"0": {...}}`), or an array-of-objects property before erroring, and keeps the bare-array + truncated-array repairs for cloud.
+  - Figure descriptions (`summary/prompt.rs`): the prompt requests `{"descriptions": [...]}`; `parse_figure_descriptions_response` recovers the same object shapes.
+  - Citation Finder / claim splitter already request `{"results": [...]}` / `{"claims": [...]}` and share the lenient `resolve_array` recovery (`citation_finder/prompt.rs`).
+  Any new local structured call site must follow this pattern; a bare-array-only parser is a guaranteed live failure on Bango AI.
 - Manual `strip_code_fences` calls in JSON-returning command handlers are deprecated; `send_json` handles fence-stripping centrally. The sole remaining direct `strip_code_fences` caller is the summary command's markdown-fallback retry path (prose-shaped, not JSON).
 
 ### `RequestBuilder` cloning

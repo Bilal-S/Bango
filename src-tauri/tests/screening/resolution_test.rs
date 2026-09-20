@@ -1,6 +1,7 @@
 use bango_lib::models::criterion::{CriterionType, Priority};
 use bango_lib::screening::resolution::{
-    finalize_decision, resolve_decision, CriterionMatch, ScreeningInput,
+    finalize_decision, finalize_decision_with_failed, resolve_decision,
+    resolve_decision_with_failed, CriterionMatch, ScreeningInput,
 };
 
 fn make_match(id: &str, c_type: CriterionType, priority: Priority) -> CriterionMatch {
@@ -72,6 +73,73 @@ fn test_resolve_multiple_matches_uses_highest_priority() {
     };
     // Highest Inc is Standard, Highest Exc is High. High wins.
     assert_eq!(resolve_decision(&input), "exclude");
+}
+
+// ── failed-inclusion guard (small-model self-contradiction) ────────────────
+//
+// The "West-Germany" live case: the LLM's decision field said `include` while
+// its matched arrays marked the high-priority inclusion "Geography United
+// Kingdom" as FAILED (an inclusion key in the exclusion array). A validated
+// failed inclusion that strictly outranks every satisfied inclusion must
+// force exclude; equal priority keeps tie-favors-inclusion.
+
+#[test]
+fn failed_inclusion_outranking_satisfied_inclusion_excludes() {
+    let input = ScreeningInput {
+        inclusion_matches: vec![make_match("policy", CriterionType::Inclusion, Priority::Standard)],
+        exclusion_matches: vec![],
+    };
+    let failed = vec![make_match("uk", CriterionType::Inclusion, Priority::High)];
+    assert_eq!(resolve_decision_with_failed(&input, &failed), "exclude");
+    assert_eq!(
+        resolve_decision(&input),
+        "include",
+        "the legacy resolver without the failed list keeps prior behavior"
+    );
+}
+
+#[test]
+fn failed_inclusion_equal_priority_keeps_tie_favors_inclusion() {
+    let input = ScreeningInput {
+        inclusion_matches: vec![make_match("policy", CriterionType::Inclusion, Priority::Standard)],
+        exclusion_matches: vec![],
+    };
+    let failed = vec![make_match("substance", CriterionType::Inclusion, Priority::Standard)];
+    assert_eq!(
+        resolve_decision_with_failed(&input, &failed),
+        "include",
+        "equal priority must not override the satisfied inclusion"
+    );
+}
+
+#[test]
+fn failed_inclusion_lower_priority_does_not_override() {
+    let input = ScreeningInput {
+        inclusion_matches: vec![make_match("policy", CriterionType::Inclusion, Priority::High)],
+        exclusion_matches: vec![],
+    };
+    let failed = vec![make_match("temporal", CriterionType::Inclusion, Priority::Low)];
+    assert_eq!(resolve_decision_with_failed(&input, &failed), "include");
+}
+
+#[test]
+fn failed_inclusion_without_satisfied_inclusion_excludes() {
+    let input = ScreeningInput { inclusion_matches: vec![], exclusion_matches: vec![] };
+    let failed = vec![make_match("uk", CriterionType::Inclusion, Priority::High)];
+    assert_eq!(resolve_decision_with_failed(&input, &failed), "exclude");
+}
+
+#[test]
+fn failed_inclusion_guard_is_suppressed_by_custom_logic() {
+    // Combinatorial custom rules are the supreme authority; the guard must
+    // never second-guess a custom-logic decision.
+    let input = ScreeningInput {
+        inclusion_matches: vec![make_match("policy", CriterionType::Inclusion, Priority::Standard)],
+        exclusion_matches: vec![],
+    };
+    let failed = vec![make_match("uk", CriterionType::Inclusion, Priority::Critical)];
+    assert_eq!(finalize_decision_with_failed("include", &input, &failed, true), "include");
+    assert_eq!(finalize_decision_with_failed("include", &input, &failed, false), "exclude");
 }
 
 // ── finalize_decision: Custom Screening Instructions governance ────────────

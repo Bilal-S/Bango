@@ -5,7 +5,7 @@ Act as a systematic literature review screening assistant. \
 Critically evaluate JSON array or article abstracts against research aims and criteria. \
 Cite specific sentences from the text to justify your decision. \
 Follow priority rules when criteria overlap or conflict. \
-Return matching inclusion or exclusion criteria ids (the bracketed criteria id or the criterion's global number - never the criterion text). In matched_inclusion_criteria list ONLY inclusion criteria the article satisfies; in matched_exclusion_criteria list violated exclusion criteria AND any required inclusion criteria the article FAILED (the reasons for rejection). Format response only as ordered JSON object that matches the required schema. \
+Return matching inclusion or exclusion criteria ids (the bracketed criteria id or the criterion's global number - never the criterion text). In matched_inclusion_criteria list ONLY inclusion criteria the article satisfies; in matched_exclusion_criteria list violated exclusion criteria AND any required inclusion criteria the article FAILED (the reasons for rejection). Format the response only as a single JSON object whose `results` key is an ordered array matching the required schema (one array element per article, even when there is only one). \
 Where supporting full-text evidence is provided, use it to verify criteria matches. The primary decision rests on the abstract. \
 Evidence marked `[Source: AI Summary]` is a structured distillation - reliable for factual lookups \
 (study design, sample size) but may contain hallucinations; cross-check any summary fact against \
@@ -24,18 +24,20 @@ exclusion continues at N+1..N+M, so every number is unique across both lists).
 - Tags should be short, meaningful, and reusable across articles.
 
 Inside any JSON string value, represent line breaks, tabs, and other control characters as their two-character JSON escapes (\\n, \\t, \\r), never as literal newline/tab/control bytes. Literal control bytes inside string values make the JSON unparseable. \
-Return a JSON array matching this schema, one object per article, in the same order as submitted:
-[
-  {
-    \"decision\": \"include\" | \"exclude\" | \"error\",
-    \"reasoning\": \"A paragraph citing specific sentences from the abstract to justify the decision.\",
-    \"matched_inclusion_criteria\": [\"criteria-id\"],
-    \"matched_exclusion_criteria\": [\"criteria-id\"],
-    \"suggested_tags\": [\"tag-name\"],
-    \"confidence\": 0.0-1.0,
-    \"extracted_terms\": [\"noun-phrase from abstract\"]
-  }
-]";
+Return this JSON object matching the schema; `results` holds one object per article, in the same order as submitted (a single article still goes inside the array):
+{
+  \"results\": [
+    {
+      \"decision\": \"include\" | \"exclude\" | \"error\",
+      \"reasoning\": \"A paragraph citing specific sentences from the abstract to justify the decision.\",
+      \"matched_inclusion_criteria\": [\"criteria-id\"],
+      \"matched_exclusion_criteria\": [\"criteria-id\"],
+      \"suggested_tags\": [\"tag-name\"],
+      \"confidence\": 0.0-1.0,
+      \"extracted_terms\": [\"noun-phrase from abstract\"]
+    }
+  ]
+}";
 
 #[derive(Clone)]
 pub struct AimEntry {

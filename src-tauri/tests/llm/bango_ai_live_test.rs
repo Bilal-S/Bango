@@ -4,14 +4,18 @@
 //! `tests/slow-manifest.toml`. The T4 test hits the network (one ~18 MB
 //! GitHub release download) and writes only to a temp dir.
 
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use bango_lib::llm::local::engine::{
     model_path, BangoAiEngine, EngineConfig, HealthProbe, ServerSpec, SystemSpawner, TcpHealthProbe,
 };
 use bango_lib::llm::local::install::{install_model_profile, install_runtime_bundle, server_path};
 use bango_lib::llm::local::manifest::local_manifest;
+use bango_lib::local_ai::paths::resolve_ai_paths;
+use bango_lib::models::criterion::{Criterion, CriterionType, Priority, ResearchAim};
 
 /// T4 live: the pinned runtime archive downloads, hash-verifies, extracts the
 /// pinned member set, and `llama-server --version` runs.
@@ -106,7 +110,7 @@ async fn json_probe(config: &EngineConfig, system: &str, user: &str) -> (String,
 /// leakage, prints timing observations.
 #[test]
 #[ignore = "slow"]
-fn bango_ai_ornith_acceptance_smoke() {
+fn bango_ai_acceptance_smoke() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (server, model) = install_all(dir.path());
     let engine = std::sync::Arc::new(BangoAiEngine::with_seams(
@@ -206,4 +210,203 @@ fn bango_ai_engine_idle_stop_with_override() {
          wake {wake_ms} ms"
     );
     let _ = rt.block_on(engine.stop());
+}
+
+// ── Local structured-response guards (screening + figure descriptions) ──────
+//
+// llama.cpp's `response_format: json_object` grammar CANNOT emit a bare
+// top-level JSON array, so every local structured consumer must either ask
+// for an object wrapper or recover one. These tests call the pinned model
+// with the REAL prompt builders and run the REAL parsers, so a regression in
+// either half fails here instead of in the app.
+//
+// They use the components already installed by the app when present and SKIP
+// (no download) otherwise; the temp-install acceptance smoke above remains
+// the clean-machine test.
+
+/// Production storage root (`BANGO_AI_TEST_STORAGE_ROOT` overrides for
+/// tests), mirroring `app_settings_repo`'s default `~/Documents/Bango`.
+fn installed_storage_root() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("BANGO_AI_TEST_STORAGE_ROOT") {
+        return Some(PathBuf::from(dir));
+    }
+    dirs::document_dir().map(|docs| docs.join("Bango"))
+}
+
+/// Runtime + model + engine log from the user's real install; `None` when
+/// either component is missing (callers print a skip notice).
+fn installed_components() -> Option<(PathBuf, PathBuf, PathBuf)> {
+    let manifest = local_manifest().ok()?;
+    let paths = resolve_ai_paths(&installed_storage_root()?);
+    let server = server_path(&paths.runtime_root, &manifest.runtime.version);
+    let model = model_path(&paths.model_root);
+    if !server.is_file() || !model.is_file() {
+        return None;
+    }
+    let log = paths.runtime_root.join("logs").join("llama-server.log");
+    Some((server, model, log))
+}
+
+/// Started engine against the installed components.
+struct LiveAi {
+    engine: Arc<BangoAiEngine>,
+    config: EngineConfig,
+    rt: tokio::runtime::Runtime,
+}
+
+fn start_live_ai(test: &str) -> Option<LiveAi> {
+    let Some((server, model, log)) = installed_components() else {
+        eprintln!("[bango-ai-live] {test}: components not installed; skipping");
+        return None;
+    };
+    let engine =
+        Arc::new(BangoAiEngine::with_seams(Arc::new(SystemSpawner), Arc::new(TcpHealthProbe)));
+    let spec = ServerSpec { binary: server, model, log };
+    let rt =
+        tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
+    let config = rt.block_on(engine.ensure_started(&spec)).expect("engine starts");
+    Some(LiveAi { engine, config, rt })
+}
+
+impl LiveAi {
+    fn json(&self, system: &str, user: &str) -> String {
+        self.rt.block_on(json_probe(&self.config, system, user)).0
+    }
+
+    fn stop(&self) {
+        let _ = self.rt.block_on(self.engine.stop());
+    }
+}
+
+/// The reported bug: batch size 1 + local `json_object` grammar makes the 9B
+/// model answer with a flat `{decision, reasoning}` object; the real screening
+/// parser must still produce one result.
+#[test]
+#[ignore = "slow"]
+fn bango_ai_screening_prompt_parses_under_json_object_grammar() {
+    use bango_lib::screening::json_parse::process_screening_responses;
+    use bango_lib::screening::prompt::{
+        build_screening_prompt, AimEntry, ArticleEntry, CriterionEntry, ScreeningPromptInput,
+        SYSTEM_PROMPT,
+    };
+
+    let Some(ai) = start_live_ai("screening") else { return };
+    let input = ScreeningPromptInput {
+        aims: vec![AimEntry { text: "Evaluate UK sugar-reduction policies.".to_string() }],
+        inclusion_criteria: vec![CriterionEntry {
+            id: "inc-uk".to_string(),
+            text: "Geography United Kingdom".to_string(),
+            priority: Priority::High,
+            global_number: 1,
+        }],
+        exclusion_criteria: vec![CriterionEntry {
+            id: "exc-not-uk".to_string(),
+            text: "Not United Kingdom".to_string(),
+            priority: Priority::High,
+            global_number: 2,
+        }],
+        articles: vec![ArticleEntry::new(
+            "SUGAR CONSUMPTION IN WEST-GERMANY".to_string(),
+            "Anonymous".to_string(),
+            Some(1985),
+            "Sugar consumption in West Germany is described; no UK data is reported.".to_string(),
+        )],
+        existing_tags: vec![],
+        existing_labels: vec![],
+        custom_logic: None,
+    };
+    let user = build_screening_prompt(&input);
+    let raw = ai.json(SYSTEM_PROMPT, &user);
+    let parsed = process_screening_responses(&raw);
+    if let Err(e) = &parsed {
+        panic!(
+            "screening parser must accept the local json_object response: {e}; raw: {}",
+            &raw[..raw.len().min(400)]
+        );
+    }
+    assert_eq!(parsed.expect("parsed").len(), 1, "one article must map to one result");
+    ai.stop();
+}
+
+/// The same grammar cannot emit the bare array the figure-description prompt
+/// historically requested; the prompt + parser must agree on an object wrapper.
+#[test]
+#[ignore = "slow"]
+fn bango_ai_figure_description_prompt_parses_under_json_object_grammar() {
+    use bango_lib::summary::prompt::{
+        build_figure_description_prompt, parse_figure_descriptions_response,
+        FIGURE_DESCRIPTION_SYSTEM_PROMPT,
+    };
+    use bango_lib::utils::sections::{Caption, CaptionKind};
+
+    let Some(ai) = start_live_ai("figure descriptions") else { return };
+    let captions = vec![Caption {
+        kind: CaptionKind::Figure,
+        number: "1".to_string(),
+        caption: "Trends in sugar-sweetened beverage purchases in the UK, 2015-2019.".to_string(),
+        following_sentence: None,
+    }];
+    let user = build_figure_description_prompt("UK sugar tax evaluation", &captions);
+    let raw = ai.json(FIGURE_DESCRIPTION_SYSTEM_PROMPT, &user);
+    let parsed = parse_figure_descriptions_response(&raw);
+    if let Err(e) = &parsed {
+        panic!(
+            "figure descriptions parser must accept the local json_object response: {e}; raw: {}",
+            &raw[..raw.len().min(400)]
+        );
+    }
+    assert_eq!(parsed.expect("parsed").len(), 1);
+    ai.stop();
+}
+
+/// Live shape audit for the remaining `send_json` generation consumers: their
+/// real prompts must remain parseable under the local `json_object` grammar.
+///
+/// Criteria generation is intentionally absent: on the pinned 9B it looped
+/// past 5,400 generated tokens without an EOS inside the 600 s probe budget
+/// (the documented no-output-cap risk, bounded by the 1800 s local timeout in
+/// production), so it cannot serve as a shape guard yet.
+#[test]
+#[ignore = "slow"]
+fn bango_ai_structured_consumers_parse_under_json_object_grammar() {
+    let Some(ai) = start_live_ai("structured consumers") else { return };
+    let aims = vec![ResearchAim {
+        id: "aim-1".to_string(),
+        text: "Evaluate the impact of the UK Soft Drinks Industry Levy on sugar consumption."
+            .to_string(),
+        created_at: String::new(),
+    }];
+    let inclusion = vec![Criterion {
+        id: "inc-1".to_string(),
+        criterion_type: CriterionType::Inclusion,
+        text: "UK geography".to_string(),
+        priority: Priority::High,
+        created_at: String::new(),
+    }];
+    let exclusion = vec![Criterion {
+        id: "exc-1".to_string(),
+        criterion_type: CriterionType::Exclusion,
+        text: "Not United Kingdom".to_string(),
+        priority: Priority::High,
+        created_at: String::new(),
+    }];
+
+    // Search strategy (typed `SearchStrategyResult` parse).
+    let (system, user) = bango_lib::commands::search_strategy::build_search_strategy_prompt(
+        &aims, &inclusion, &exclusion,
+    );
+    let raw = ai.json(&system, &user);
+    bango_lib::commands::search_strategy::parse_search_strategy_response(&raw).unwrap_or_else(
+        |e| panic!("search strategy parse failed: {e}; raw: {}", &raw[..raw.len().min(400)]),
+    );
+
+    // OpenAlex smart search (typed `SmartSearchQuery` parse).
+    let (system, user) =
+        bango_lib::openalex::smart_search::build_smart_search_prompt(&aims, &inclusion, &exclusion);
+    let raw = ai.json(&system, &user);
+    bango_lib::openalex::smart_search::parse_smart_search_response(&raw).unwrap_or_else(|e| {
+        panic!("openalex smart search parse failed: {e}; raw: {}", &raw[..raw.len().min(400)])
+    });
+
+    ai.stop();
 }

@@ -7,18 +7,20 @@ For each caption provided, produce a concise description grounded strictly in th
 **JSON string escaping (important):** Inside any JSON string value, represent line breaks, tabs, and other control characters as their two-character JSON escapes (`\n`, `\t`, `\r`), never as literal newline/tab/control bytes. Literal control bytes inside string values make the JSON unparseable.
 
 
-Return a JSON array of objects, one per caption, with no markdown code fences or pre/post text:
+Return a JSON object with a single top-level "descriptions" key whose value is an array with one object per caption, and no markdown code fences or pre/post text:
 
-[
-  {
-    "number": "the figure or table number as a string (e.g. '1', '2a')",
-    "description": "a concise summary of what the caption states the figure/table shows"
-  }
-]
+{
+  "descriptions": [
+    {
+      "number": "the figure or table number as a string (e.g. '1', '2a')",
+      "description": "a concise summary of what the caption states the figure/table shows"
+    }
+  ]
+}
 
 ## RULES
 - Only describe what the caption explicitly states. Do not extrapolate.
 - If the caption references quantitative data, reproduce the numbers faithfully.
 - Keep each description to 1-3 sentences.
 - Never fabricate trends, comparisons, or conclusions not present in the caption text.
-- If the input contains no captions, return an empty array: `[]`.
+- If the input contains no captions, return an empty array: `{"descriptions": []}`.

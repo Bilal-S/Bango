@@ -81,7 +81,7 @@ function formatBytes(bytes: number): string {
 
 const downloadLabel = computed(() => {
   const bytes = status.value?.downloadBytes ?? 0;
-  if (!bytes) return 'about 5.8 GB';
+  if (!bytes) return 'about 1.3 GB';
   return `about ${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 });
 

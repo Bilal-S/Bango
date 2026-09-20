@@ -21,7 +21,7 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>();
 const cancelButton = ref<HTMLButtonElement | null>(null);
 
 const downloadLabel = computed(() => {
-  if (props.downloadBytes <= 0) return 'about 5.8 GB';
+  if (props.downloadBytes <= 0) return 'about 1.3 GB';
   const gb = props.downloadBytes / (1024 * 1024 * 1024);
   return `about ${gb.toFixed(1)} GB`;
 });

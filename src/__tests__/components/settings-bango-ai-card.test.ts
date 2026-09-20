@@ -66,8 +66,8 @@ function status(overrides: Partial<BangoAiStatus> = {}): BangoAiStatus {
     supportedTarget: true,
     engineState: 'stopped',
     busy: false,
-    profile: 'builtin/ornith-1.5-9b-q4km@r1',
-    model: 'Ornith 1.5 9B',
+    profile: 'builtin/qwen3.5-2b-ud-q4kxl@r1',
+    model: 'Qwen3.5 2B',
     license: 'MIT',
     licenseUrl: 'https://example.invalid/model',
     engine: 'llama.cpp',
@@ -150,7 +150,7 @@ describe('settings-bango-ai-card', () => {
     refOf<boolean>('installing').value = true;
     refOf<unknown>('progress').value = {
       phase: 'downloading',
-      file: 'Ornith-1.5-9B-Q4_K_M.gguf',
+      file: 'Qwen3.5-2B-UD-Q4_K_XL.gguf',
       fileBytes: 2_000_000_000,
       fileTotal: 5_800_000_000,
       overallBytes: 50,

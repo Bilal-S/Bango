@@ -110,9 +110,13 @@ fn test_parse_invalid_json_returns_error() {
 }
 
 #[test]
-fn test_parse_json_object_instead_of_array_returns_error() {
+fn test_parse_json_object_instead_of_array_is_recovered() {
+    // Local json_object grammar cannot emit a bare array; a flat decision
+    // object must rescue as a one-element array (West-Germany live bug).
     let raw = r#"{"decision":"include","reasoning":"ok"}"#;
-    assert!(process_screening_responses(raw).is_err());
+    let results = process_screening_responses(raw).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].decision, "include");
 }
 
 #[test]

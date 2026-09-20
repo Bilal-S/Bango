@@ -1,4 +1,4 @@
-//! Pinned component manifest for the Bango AI profile (Ornith-1.5-9B Q4_K_M
+//! Pinned component manifest for the Bango AI profile (Qwen3.5-2B UD-Q4_K_XL
 //! on a pinned llama.cpp runtime).
 //!
 //! The manifest is the single source of truth for WHAT gets installed, WHERE
@@ -248,21 +248,29 @@ pub fn local_manifest() -> Result<BangoAiManifest, AppError> {
     parse_manifest(BANGO_AI_MANIFEST_JSON)
 }
 
-/// The pinned v1 manifest: Ornith-1.5-9B Q4_K_M (MIT) plus the pinned
-/// llama.cpp `b10964` runtime archives. Member/alias data enumerated from the
-/// real archives during the T4 spike.
+/// The pinned manifest: Qwen3.5-2B UD-Q4_K_XL (Apache-2.0, unsloth dynamic
+/// quant of `Qwen/Qwen3.5-2B`) plus the pinned llama.cpp `b10964` runtime
+/// archives. Member/alias data enumerated from the real archives during the
+/// T4 spike.
+///
+/* Previous pinned model (Ornith-1.5-9B Q4_K_M), kept for revert:
+profile "builtin/ornith-1.5-9b-q4km@r1", model "Ornith 1.5 9B",
+license "MIT", licenseUrl "https://huggingface.co/ornith-ai/Ornith-1.5-9B-GGUF",
+sourceRevision "abdd624b12ebf020b767fff532ff44fe552b28c3",
+files: [{ name "Ornith-1.5-9B-Q4_K_M.gguf", size 5780090816,
+sha256 "70c112196e0b7023803c9762752e46d29e612a92c83f995bc3ba1ceb07e8fab6" }]. */
 pub const BANGO_AI_MANIFEST_JSON: &str = r#"{
-  "profile": "builtin/ornith-1.5-9b-q4km@r1",
-  "model": "Ornith 1.5 9B",
-  "license": "MIT",
-  "licenseUrl": "https://huggingface.co/ornith-ai/Ornith-1.5-9B-GGUF",
-  "sourceRevision": "abdd624b12ebf020b767fff532ff44fe552b28c3",
+  "profile": "builtin/qwen3.5-2b-ud-q4kxl@r1",
+  "model": "Qwen3.5 2B",
+  "license": "Apache-2.0",
+  "licenseUrl": "https://huggingface.co/Qwen/Qwen3.5-2B",
+  "sourceRevision": "623132b93af32b5806046e70ebb1061e144fa3ee",
   "files": [
     {
-      "name": "Ornith-1.5-9B-Q4_K_M.gguf",
-      "url": "https://huggingface.co/ornith-ai/Ornith-1.5-9B-GGUF/resolve/abdd624b12ebf020b767fff532ff44fe552b28c3/Ornith-1.5-9B-Q4_K_M.gguf",
-      "size": 5780090816,
-      "sha256": "70c112196e0b7023803c9762752e46d29e612a92c83f995bc3ba1ceb07e8fab6"
+      "name": "Qwen3.5-2B-UD-Q4_K_XL.gguf",
+      "url": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/623132b93af32b5806046e70ebb1061e144fa3ee/Qwen3.5-2B-UD-Q4_K_XL.gguf",
+      "size": 1339752704,
+      "sha256": "0af96165ea615bea39a04118d63f0b6d35908aea850ee4a51aa6151d851b8b35"
     }
   ],
   "runtime": {
@@ -630,12 +638,12 @@ mod tests {
     fn bango_ai_manifest_pins_runtime_and_model_files() {
         let manifest = local_manifest().expect("embedded manifest parses + validates");
         assert_eq!(manifest.profile, LOCAL_LLM_PROFILE_ID);
-        assert_eq!(manifest.license, "MIT");
+        assert_eq!(manifest.license, "Apache-2.0");
         // Model: one pinned GGUF at the pinned commit.
         assert_eq!(manifest.files.len(), 1);
         let model = &manifest.files[0];
-        assert_eq!(model.name, "Ornith-1.5-9B-Q4_K_M.gguf");
-        assert_eq!(model.size, 5_780_090_816);
+        assert_eq!(model.name, "Qwen3.5-2B-UD-Q4_K_XL.gguf");
+        assert_eq!(model.size, 1_339_752_704);
         assert!(model.sha256.is_some(), "model hash must be pinned");
         assert!(model.url.contains(&format!("/resolve/{}/", manifest.source_revision)));
         // Runtime: all three targets, release-pinned, with member sets and the

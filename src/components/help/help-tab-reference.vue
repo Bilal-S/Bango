@@ -2659,12 +2659,12 @@ ER  - </pre>
             <h3>Before You Set It Up</h3>
             <ul>
               <li>
-                Bango AI downloads an AI engine (about 18 MB) and the model (about 5.8 GB). The
+                Bango AI downloads an AI engine (about 18 MB) and the model (about 1.3 GB). The
                 download can be cancelled and resumed, and everything can be removed later from
                 Settings.
               </li>
               <li>
-                The model needs roughly 8 GB of memory to run; 16 GB or more of total memory is
+                The model needs roughly 3 GB of memory to run; 16 GB or more of total memory is
                 recommended. On smaller machines it may be slow or fail to load.
               </li>
               <li>

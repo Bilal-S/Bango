@@ -99,8 +99,64 @@ pub fn build_figure_description_prompt(
     let captions_block = blocks.join("\n");
     format!(
         "## Paper Title\n{title}\n\n## Captions\n\n{captions_block}\n\n\
-         For each caption above, return a JSON array of objects with `number` and `description` keys."
+         For each caption above, return a JSON object with a single top-level \
+         \"descriptions\" key whose value is a JSON array of objects with `number` and \
+         `description` keys."
     )
+}
+
+/// Wrapper keys a local `json_object` figure response may use for the caption
+/// array. The prompt requests `descriptions`; the rest are resilience for
+/// model drift.
+const FIGURE_WRAPPER_KEYS: &[&str] =
+    &["descriptions", "figures", "tables", "results", "result", "data", "items"];
+
+/// Resolve an object-root figure-description response to the caption array.
+///
+/// The local `response_format: json_object` grammar cannot emit a bare
+/// top-level array, so recovery covers the observed shapes: a known wrapper
+/// key, a flat single object (has `number`), a numeric-key map
+/// (`{"1": {...}}`), then any array-of-objects property. `None` when nothing
+/// is recoverable so the caller surfaces a shape error, not an empty result.
+#[must_use]
+fn resolve_figure_array(value: &serde_json::Value) -> Option<serde_json::Value> {
+    if value.is_array() {
+        return Some(value.clone());
+    }
+    let obj = value.as_object()?;
+
+    for key in FIGURE_WRAPPER_KEYS {
+        if let Some(inner) = obj.get(*key) {
+            if inner.is_array() {
+                return Some(inner.clone());
+            }
+        }
+    }
+
+    if obj.contains_key("number") {
+        return Some(serde_json::Value::Array(vec![value.clone()]));
+    }
+
+    if !obj.is_empty() && obj.keys().all(|k| k.parse::<usize>().is_ok()) {
+        let mut numeric: Vec<(usize, &serde_json::Value)> =
+            obj.iter().filter_map(|(k, v)| k.parse::<usize>().ok().map(|i| (i, v))).collect();
+        numeric.sort_by_key(|(i, _)| *i);
+        if numeric.iter().all(|(_, v)| v.is_object()) {
+            return Some(serde_json::Value::Array(
+                numeric.into_iter().map(|(_, v)| v.clone()).collect(),
+            ));
+        }
+    }
+
+    for inner in obj.values() {
+        if let Some(arr) = inner.as_array() {
+            if arr.first().is_some_and(serde_json::Value::is_object) {
+                return Some(inner.clone());
+            }
+        }
+    }
+
+    None
 }
 
 /// Parse batched figure/table description response. Tolerates code fences + whitespace.
@@ -113,8 +169,14 @@ pub fn parse_figure_descriptions_response(
     let prepared = prepare_llm_json(response);
     let value: serde_json::Value = serde_json::from_str(&prepared)
         .map_err(|e| AppError::Import(format!("Invalid JSON for figure descriptions: {e}")))?;
-    let arr = value.as_array().ok_or_else(|| {
-        AppError::Import("Figure descriptions response is not a JSON array".to_string())
+    let resolved = resolve_figure_array(&value).ok_or_else(|| {
+        AppError::Import(
+            "Figure descriptions response is not a JSON array or a recoverable object wrapper"
+                .to_string(),
+        )
+    })?;
+    let arr = resolved.as_array().ok_or_else(|| {
+        AppError::Import("Figure descriptions resolved value is not a JSON array".to_string())
     })?;
     let mut out = Vec::with_capacity(arr.len());
     for elem in arr {

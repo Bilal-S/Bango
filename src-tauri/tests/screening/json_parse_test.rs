@@ -161,3 +161,53 @@ fn process_screening_responses_normalizes_decision_case() {
         results[2].reasoning
     );
 }
+
+// ── object-root recovery (local `response_format: json_object`) ─────────────
+//
+// llama.cpp's json_object grammar cannot emit a bare top-level array, so the
+// 9B model answers with an object. The parser must recover the common shapes:
+// a flat single decision object, a numeric-key map, and a wrapper key.
+
+#[test]
+fn process_screening_responses_accepts_flat_single_object() {
+    // Exact "West-Germany" live failure: one-article batch, flat object.
+    let raw = r#"{
+        "decision": "exclude",
+        "reasoning": "The article is set in West-Germany, not the United Kingdom.",
+        "matched_exclusion_criteria": [],
+        "matched_inclusion_criteria": []
+    }"#;
+    let results = process_screening_responses(raw).expect("flat single decision object must parse");
+    assert_eq!(results.len(), 1, "flat object must rescue as a one-element array");
+    assert_eq!(results[0].decision, "exclude");
+}
+
+#[test]
+fn process_screening_responses_accepts_numeric_key_map() {
+    // The grammar sometimes numbers the objects instead of wrapping them.
+    let raw = r#"{
+        "0": {"decision": "include", "reasoning": "uk"},
+        "1": {"decision": "exclude", "reasoning": "us"}
+    }"#;
+    let results = process_screening_responses(raw).expect("numeric-key map must parse");
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].decision, "include", "numeric order must define array order");
+    assert_eq!(results[1].decision, "exclude");
+}
+
+#[test]
+fn process_screening_responses_accepts_results_wrapper() {
+    // The prompt's canonical wrapper shape under the local grammar.
+    let raw = r#"{"results": [{"decision": "include", "reasoning": "uk"}]}"#;
+    let results = process_screening_responses(raw).expect("results wrapper must parse");
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].decision, "include");
+}
+
+#[test]
+fn process_screening_responses_still_rejects_unrecoverable_object() {
+    // An object with no decision, no numeric map, and no array of objects is a
+    // genuine LLM failure and must surface as an error, not an empty batch.
+    let raw = r#"{"error": "I cannot screen these articles"}"#;
+    assert!(process_screening_responses(raw).is_err(), "unrecoverable object must fail the parse");
+}

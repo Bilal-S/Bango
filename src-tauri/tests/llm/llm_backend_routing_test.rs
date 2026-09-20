@@ -105,7 +105,7 @@ fn local_config(endpoint: &str) -> LlmConfig {
         provider: LlmProvider::BangoAi,
         endpoint_url: endpoint.to_string(),
         api_key_encrypted: Some("local-key".to_string()),
-        model_name: "builtin/ornith-1.5-9b-q4km@r1".to_string(),
+        model_name: "builtin/qwen3.5-2b-ud-q4kxl@r1".to_string(),
         temperature: 0.6,
         skip_temperature: false,
         max_concurrent_requests: 1,

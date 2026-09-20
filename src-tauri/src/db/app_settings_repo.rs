@@ -469,7 +469,7 @@ pub fn set_embedding_backend(
 ///
 /// `configured_provider` (default) follows the configured LLM provider;
 /// `bango_ai` runs on-device inference via the downloaded llama.cpp runtime +
-/// Ornith model. The domain type lives in `llm::backend`; this repo owns only
+/// Qwen3.5 model. The domain type lives in `llm::backend`; this repo owns only
 /// the key's persistence. Project-portable: the preference travels with a
 /// project backup (an imported selection never implies readiness - components
 /// and engine health stay machine-evaluated).

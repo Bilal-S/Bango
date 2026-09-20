@@ -338,6 +338,12 @@ fn build_figure_description_prompt_embeds_title_and_captions() {
     assert!(prompt.contains("Bar chart of BMI by age group."));
     assert!(prompt.contains("[Table 2]"), "table caption must be labeled: {prompt}");
     assert!(prompt.contains("Study characteristics for the sample."));
+    // The local `response_format: json_object` grammar cannot emit a bare
+    // top-level array, so the prompt must request an object wrapper.
+    assert!(
+        prompt.contains("\"descriptions\""),
+        "prompt must request the descriptions object wrapper: {prompt}"
+    );
 }
 
 #[test]
@@ -369,15 +375,44 @@ fn parse_figure_descriptions_response_tolerates_code_fences() {
 }
 
 #[test]
+fn parse_figure_descriptions_response_accepts_descriptions_wrapper() {
+    // Canonical local shape: the prompt requests {"descriptions": [...]}.
+    let response = r#"{"descriptions": [{"number": "1", "description": "A chart."}]}"#;
+    let parsed = parse_figure_descriptions_response(response).expect("wrapper must parse");
+    assert_eq!(parsed.len(), 1);
+    assert_eq!(parsed[0].number, "1");
+}
+
+#[test]
+fn parse_figure_descriptions_response_accepts_numeric_key_map() {
+    // Live 9B output under json_object: {"1": {"number": "1", ...}}.
+    let response = r#"{
+        "1": {"number": "1", "description": "Trends 2015-2019."}
+    }"#;
+    let parsed = parse_figure_descriptions_response(response).expect("numeric map must parse");
+    assert_eq!(parsed.len(), 1);
+    assert_eq!(parsed[0].number, "1");
+    assert_eq!(parsed[0].description, "Trends 2015-2019.");
+}
+
+#[test]
+fn parse_figure_descriptions_response_accepts_flat_single_object() {
+    let response = r#"{"number": "2", "description": "A single caption summary."}"#;
+    let parsed = parse_figure_descriptions_response(response).expect("flat object must parse");
+    assert_eq!(parsed.len(), 1);
+    assert_eq!(parsed[0].number, "2");
+}
+
+#[test]
 fn parse_figure_descriptions_response_returns_err_on_malformed_json() {
     let result = parse_figure_descriptions_response("not json at all");
     assert!(result.is_err(), "malformed JSON must error, not panic");
 }
 
 #[test]
-fn parse_figure_descriptions_response_returns_err_on_non_array() {
-    let result = parse_figure_descriptions_response(r#"{"number": "1"}"#);
-    assert!(result.is_err(), "non-array must error");
+fn parse_figure_descriptions_response_returns_err_on_unrecoverable_object() {
+    let result = parse_figure_descriptions_response(r#"{"unexpected": "shape"}"#);
+    assert!(result.is_err(), "unrecoverable object must error");
 }
 
 #[test]

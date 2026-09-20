@@ -11,7 +11,7 @@ vi.mock('@/composables/use-bango-ai', async () => {
   const { ref } = await import('vue');
   mocked.state = {
     backend: ref('configured_provider'),
-    status: ref({ state: 'ready', supportedTarget: true, model: 'Ornith 1.5 9B' }),
+    status: ref({ state: 'ready', supportedTarget: true, model: 'Qwen3.5 2B' }),
     switching: ref(false),
     installing: ref(false),
     error: ref<string | null>(null),

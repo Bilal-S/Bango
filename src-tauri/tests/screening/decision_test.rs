@@ -155,8 +155,39 @@ fn resolve_article_decision_failed_inclusion_via_exclusion_array() {
         decision.auto_label_criteria,
         vec![("Exclusion".to_string(), "Exclusion text".to_string())]
     );
-    // The critical inclusion never became a match, so the LLM exclude stands.
+    // The critical inclusion never became a match, but it feeds the
+    // failed-inclusion guard, so the exclude is deterministic either way.
     assert_eq!(decision.final_decision, "exclude");
+}
+
+#[test]
+fn resolve_article_decision_failed_high_priority_inclusion_overrides_llm_include() {
+    // West-Germany live case: the LLM says include and satisfies a standard
+    // inclusion, but marks the high-priority UK geography inclusion as FAILED
+    // via the exclusion array. The guard forces exclude and keeps the failed
+    // id in the stored exclusion array with an override annotation.
+    let policy = criterion("policy", "Policy Focus", CriterionType::Inclusion, Priority::Standard);
+    let uk = criterion("uk", "Geography United Kingdom", CriterionType::Inclusion, Priority::High);
+    let criteria = vec![policy.clone(), uk.clone()];
+    let inc_refs = vec![&policy, &uk];
+    let exc_refs: Vec<&Criterion> = vec![];
+    let global = numbering(&inc_refs, &exc_refs);
+    let ev_labels = HashMap::new();
+
+    // "1" = policy satisfied; "2" = uk failed (inclusion key in exclusion array).
+    let screening = response("include", "Not UK but included.", &["1"], &["2"]);
+    let decision = resolve_article_decision(
+        &screening, "art-1", &criteria, &inc_refs, &global, false, &ev_labels,
+    );
+
+    assert_eq!(decision.final_decision, "exclude");
+    assert_eq!(decision.augmented_inc, vec!["policy".to_string()]);
+    assert!(decision.augmented_exc.contains(&"uk".to_string()));
+    assert!(
+        decision.reasoning.contains("[App override:"),
+        "override annotation expected: {}",
+        decision.reasoning
+    );
 }
 
 #[test]

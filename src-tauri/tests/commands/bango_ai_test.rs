@@ -113,11 +113,11 @@ fn status_reports_derived_state_hardware_and_paths() {
     assert_eq!(status.state, "not_installed");
     assert_eq!(status.backend, "configured_provider");
     assert_eq!(status.profile, profile_id());
-    assert_eq!(status.model, "Ornith 1.5 9B");
-    assert_eq!(status.license, "MIT");
+    assert_eq!(status.model, "Qwen3.5 2B");
+    assert_eq!(status.license, "Apache-2.0");
     assert!(status.model_root.ends_with("model"));
     assert!(status.runtime_root.ends_with("runtimes"));
-    assert!(status.download_bytes > 5_000_000_000, "model dominates the download");
+    assert!(status.download_bytes > 1_000_000_000, "model dominates the download");
     assert!(status.required_bytes > status.download_bytes);
     assert!(status.verdict.installable(), "verdict must be a value, not an error");
     assert!(!status.runtime_ready && !status.model_ready);

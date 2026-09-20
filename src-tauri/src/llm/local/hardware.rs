@@ -121,10 +121,16 @@ pub fn detect() -> HardwareProfile {
         total_ram_mb: total_bytes / (1024 * 1024),
         available_ram_mb: available_resident / (1024 * 1024),
         available_disk_mb: available_bytes(&disk_path).map_or(u64::MAX, |b| b / (1024 * 1024)),
-        avx2: if cfg!(target_arch = "x86_64") {
-            Some(std::arch::is_x86_feature_detected!("avx2"))
-        } else {
-            None
+        avx2: {
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            {
+                Some(std::arch::is_x86_feature_detected!("avx2"))
+            }
+
+            #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+            {
+                None
+            }
         },
     }
 }

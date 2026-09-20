@@ -46,8 +46,8 @@ const STATUS: BangoAiStatus = {
   supportedTarget: true,
   engineState: 'ready',
   busy: false,
-  profile: 'builtin/ornith-1.5-9b-q4km@r1',
-  model: 'Ornith 1.5 9B',
+  profile: 'builtin/qwen3.5-2b-ud-q4kxl@r1',
+  model: 'Qwen3.5 2B',
   license: 'MIT',
   licenseUrl: 'https://example.invalid/model',
   engine: 'llama.cpp',
@@ -137,7 +137,7 @@ describe('use-bango-ai', () => {
     await runInScope(async (dispose) => {
       const api = useBangoAi();
       await api.load();
-      expect(api.status.value?.model).toBe('Ornith 1.5 9B');
+      expect(api.status.value?.model).toBe('Qwen3.5 2B');
       expect(api.backend.value).toBe('bango_ai');
       expect(eventCallbacks.has('bango_ai:component')).toBe(true);
       dispose();
@@ -184,7 +184,7 @@ describe('use-bango-ai', () => {
       first.installing.value = true;
       first.progress.value = {
         phase: 'downloading',
-        file: 'Ornith-1.5-9B-Q4_K_M.gguf',
+        file: 'Qwen3.5-2B-UD-Q4_K_XL.gguf',
         fileBytes: 1,
         fileTotal: 2,
         overallBytes: 1,
@@ -192,7 +192,7 @@ describe('use-bango-ai', () => {
         message: null,
       };
       expect(second.installing.value).toBe(true);
-      expect(second.progress.value?.file).toBe('Ornith-1.5-9B-Q4_K_M.gguf');
+      expect(second.progress.value?.file).toBe('Qwen3.5-2B-UD-Q4_K_XL.gguf');
       first.error.value = 'boom';
       expect(second.error.value).toBe('boom');
     });

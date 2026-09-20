@@ -70,8 +70,16 @@ lookup against `build_global_criterion_numbering`. Keys split by meaning into
 via the EXCLUSION array means the required criterion was not met and is the
 rejection reason. Failed entries merge into the stored
 `matched_exclusion_criteria` array (implicit cross-type storage, resolved by
-criterion type at display/report time) but NEVER join `CriterionMatch`es, so
-they cannot influence the priority resolver or generate auto-labels. An
+criterion type at display/report time) and never join the satisfied/violated
+`CriterionMatch`es (so they generate no auto-labels). They DO feed the
+failed-inclusion guard in `resolution::resolve_decision_with_failed`: a
+validated failed inclusion whose priority strictly outranks every satisfied
+inclusion forces `exclude`, so a self-contradicting LLM `include` (decision
+field `include` while its matched arrays mark a higher-priority inclusion
+failed - the "West-Germany" live case on the Qwen3.5-2B) cannot bypass the
+review definition. Equal priority keeps the tie-favors-inclusion rule; custom
+screening logic suppresses the guard entirely (LLM decision final, per the
+custom-logic governance contract). An
 exclusion key via the inclusion array is dropped without blocking a later
 meaningful placement of the same criterion; unresolvable junk (out-of-range
 numbers, unknown text) is dropped entirely; text keys are stored as UUIDs.
@@ -82,6 +90,24 @@ global number, never criterion text" and defines the failed-inclusion
 semantics. PRISMA exclusion tables render inclusion-type ids with the
 `NOT MET:` prefix (`prisma::report::NOT_MET_PREFIX`, also applied in
 `prisma::data` exclusion reasons).
+
+### Local `json_object` response shape (structured-array recovery, v8.8)
+
+The local Bango AI path sends grammar-backed `response_format: json_object`,
+which cannot emit a bare top-level array. `SYSTEM_PROMPT` therefore requests
+`{"results": [...]}` (one object per article, even for a single article), and
+`process_screening_responses` resolves the object root before deserializing:
+known wrapper key (`results`/`result`/`screenings`/`data`/`articles`), a flat
+single decision object, a numeric-key map (`{"0": {...}}`), then any
+array-of-objects property. Bare arrays still parse unchanged and the
+truncated-array repair stays for cloud; an unrecoverable object surfaces the
+original parse error (never an empty batch). Cloud transports never receive
+`response_format`, so wrapper support is additive. Figure descriptions follow
+the same pattern (`{"descriptions": [...]}` + `parse_figure_descriptions_response`
+recovery). Live guards (skip when components are absent):
+`bango_ai_screening_prompt_parses_under_json_object_grammar` +
+`bango_ai_figure_description_prompt_parses_under_json_object_grammar`
+(`tests/llm/bango_ai_live_test.rs`).
 
 ### Custom-logic governance contract (v8.1)
 
