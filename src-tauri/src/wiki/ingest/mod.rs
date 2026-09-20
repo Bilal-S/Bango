@@ -30,7 +30,8 @@ pub use authors::{
 };
 pub use batching::{
     build_ingest_prompt_batches, build_ingest_prompt_batches_with_budgets, load_raw_sources,
-    run_chunked_ingest, IngestBatch, IngestLlmSender, IngestRunMetrics, OrchestratorIngestSender,
+    run_chunked_ingest, run_chunked_ingest_with_progress, wiki_batch_output_budget, IngestBatch,
+    IngestLlmSender, IngestProgressConfig, IngestRunMetrics, OrchestratorIngestSender,
     PromptContext, RawSource, ESTIMATED_OUTPUT_TOKENS_PER_ARTICLE, INGEST_SYSTEM_PROMPT,
     MAX_CONTINUATIONS_PER_BATCH,
 };
@@ -87,8 +88,9 @@ pub async fn write_pages_from_response(
     // 1. Ensure wiki/ output dirs exist.
     crate::wiki::storage::scaffold_tree(root)?;
 
-    // 2. Parse the LLM response into pages.
-    let parsed_pages = parse_llm_pages(llm_response);
+    // 2. Parse the LLM response into pages (repetition-guarded).
+    let mut parsed_pages = parse_llm_pages(llm_response);
+    dedupe_pages_by_slug(&mut parsed_pages);
     report.pages_written = parsed_pages.len();
 
     // 3. Write each page (with per-page progress).
@@ -143,15 +145,21 @@ pub fn finalize_ingest(
     let new_log = frontmatter::append_log_entry(&log_body, &entry);
     let _ = std::fs::write(&log_path, new_log);
 
-    // Clear the staleness flag.
-    crate::db::app_settings_repo::clear_wiki_needs_refresh(conn);
+    // Clear the staleness flag only on a completed run: a cancelled ingest
+    // (pre-seed pages written, LLM batches dropped) must stay stale so the
+    // next Update retries the LLM phase instead of looking done.
+    if report.errors.iter().any(|e| e == "Cancelled") {
+        eprintln!("[wiki:diag] ingest cancelled: wiki_needs_refresh left set");
+    } else {
+        crate::db::app_settings_repo::clear_wiki_needs_refresh(conn);
+    }
 
     Ok(())
 }
 
 /// Parse LLM response into pages. Each delimited by `<!-- PAGE:slug -->`, containing frontmatter + body.
 pub fn parse_llm_pages(response: &str) -> Vec<ParsedPage> {
-    let mut pages = Vec::new();
+    let mut pages: Vec<ParsedPage> = Vec::new();
     let delimiter = "<!-- PAGE:";
     let mut current_pos = 0;
 
@@ -185,6 +193,23 @@ pub fn parse_llm_pages(response: &str) -> Vec<ParsedPage> {
     }
 
     pages
+}
+
+/// Repetition guard: small local models can loop and re-emit the same slug.
+/// Collapse to one page per slug, keeping the LAST (usually most complete)
+/// body at the FIRST position so order stays stable. Callers apply this after
+/// the truncation/structural checks (which need the raw parse count) and on
+/// the accumulated page list across continuations.
+pub fn dedupe_pages_by_slug(pages: &mut Vec<ParsedPage>) {
+    let mut unique: Vec<ParsedPage> = Vec::with_capacity(pages.len());
+    for page in pages.drain(..) {
+        if let Some(existing) = unique.iter_mut().find(|p| p.slug == page.slug) {
+            *existing = page;
+        } else {
+            unique.push(page);
+        }
+    }
+    *pages = unique;
 }
 
 /// Write a parsed page to the wiki directory.

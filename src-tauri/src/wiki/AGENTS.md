@@ -145,6 +145,51 @@ remains for the async write-and-index path; the legacy single-call
 `build_ingest_prompt` was deleted - the batch path now covers all production
 callers.)
 
+### Local (Bango AI) ingest bounds + progress ticker (v9)
+
+A live local run produced a single `WikiIngest` call that generated 26K+ tokens with no EOS
+(the per-call timeout was the only bound), so every local generation is now capped and local
+batching is sized for the cap:
+
+- `llm::orchestrator::local_max_tokens_for(request_type)` is sent as `max_tokens` on the
+  `BangoAi` path only (WikiIngest 8192, corpus reports/CitationFinder 4096, chat 4096,
+  summary types 3072, classification/structured 2048; embeddings uncapped). Prose calls
+  with the reasoning toggle ON get 2x headroom because thinking tokens count against the cap.
+  A cap hit surfaces via `CallMeta::truncated_by_output_budget()` and flows through the
+  existing truncation handling (drop partial page + bounded continuation).
+- `wiki_batch_output_budget` (pure, `ingest/batching.rs`) floors the estimated output budget
+  to the local WikiIngest cap: 8192 -> `max_articles_per_batch = 2`, so local batches hold
+  two sources and share one prompt prefix instead of the earlier 4096 singleton batches.
+  `OrchestratorIngestSender::max_continuations()` returns
+  `LOCAL_MAX_CONTINUATIONS_PER_BATCH = 1` on Bango AI (cloud keeps 2).
+- `dedupe_pages_by_slug` (parser-level repetition guard) collapses repeated slugs per response
+  and across continuations, keeping the last body at the first position; the batch prompt also
+  ends with an explicit "stop immediately, never repeat a page" instruction.
+- `run_chunked_ingest_with_progress` races an `IngestProgressConfig` tick (production 5 s via
+  `IngestProgressConfig::production(call_timeout)`) against `join_next()`. The tick doubles as
+  the cancel poll for in-flight generations (previously cancel was only checked between batch
+  completions, so a single runaway call ignored Stop) and alternates `wiki:progress` messages:
+  `Generating (batch X/Y, M:SS) via LLM...` / `Estimating M:SS to go...`. The M:SS is the time
+  since the last batch completion (initialized to run start); past `slow_batch_threshold`
+  (`min(5 min, 40% of the active call timeout)`) the liveness half gains
+  `, slow - limit M:SS` where the limit is the active per-call timeout (`1:00:00`-style
+  `format_limit`: 60:00 local, 10:00 provider). **Backend-agnostic**: the ticker, ETA, and
+  cancel poll run for configured-provider runs too; only `call_timeout` differs (the command
+  entry points pass `resolve_timeout(&LlmRequestType::WikiIngest, is_local_config(&config))`).
+  `run_chunked_ingest` is the default-config wrapper. `format_duration`, `format_limit`,
+  `format_eta`, `slow_batch_threshold`, and `progress_tick_message` are pure and unit-tested;
+  the cancel arm is tested on paused tokio time (virtual tick + signal, no wall-clock waits).
+- A cancelled ingest returns `report.errors = ["Cancelled"]`; `finalize_ingest` then leaves
+  `wiki_needs_refresh` SET so the next Update retries (only a completed run clears it).
+  llama-server cancels the slot itself when the client drops the request (`stop: cancel task`
+  in the engine log), so the next serialized call does not queue behind a zombie.
+- `ensure_wiki_summaries` and `polish_framework_pages` are skipped when the backend is
+  `bango_ai` (`[wiki:diag]` logs both): per-article full-text summaries and per-framework
+  polish are the heaviest serialized local calls, and the abstract fallback plus the
+  deterministic framework skeleton keep the wiki correct. The skipped-summary count is
+  returned to the caller and surfaces as a report warning ("N full-text article(s) have no
+  AI summary; Bango AI uses their abstracts...").
+
 ### Multi-batch consolidation (gated on `batches.len() > 1`)
 
 When the corpus splits into multiple parallel batches, independent batches
@@ -211,7 +256,10 @@ articles whose `full_text_ai_summary` is missing/empty get their blob
 generated via `generate_article_ai_summary_inner`, so wiki export is
 summary-scale for every article. Per-article failures are non-fatal
 (`record_wiki_summary_failure` audit entry; abstract fallback). Skipped when
-the LLM is not configured. Emits `wiki:progress` directly in the 1-9% slice
+the LLM is not configured, and skipped unconditionally under `bango_ai` (v9;
+`[wiki:diag] ensure-summaries skipped (Bango AI)`) because serialized local
+full-text summaries are the longest pole and the abstract fallback is the
+documented degraded input. Emits `wiki:progress` directly in the 1-9% slice
 (outside the `prep_cb` 15-25% pre-seed range); cancel-checked between articles.
 
 ### Cancel-token + progress contract (v2, see `.worktrees/wiki2.md`)
@@ -222,7 +270,8 @@ All three entry points (`wiki_ingest`, `wiki_rebuild`,
 start and clear it on return. The frontend `cancel_wiki_ingest` command signals
 the active token. The pipeline checks `is_cancelled` between each of the 7
 pre-seed steps in `build_batches_with_manifest` (on cancel: `Ok(Vec::new())` =
-empty batches = no LLM calls) and between `join_next().await` completions in
+empty batches = no LLM calls) and on every progress tick plus between
+`join_next().await` completions in
 `run_chunked_ingest` (on cancel: `join_set.abort_all()`, drop in-flight
 results, return `Ok(report)` with `report.errors.push("Cancelled")`). There is
 no `Cancelled` error variant - mirrors the screening engine's
@@ -420,7 +469,7 @@ full flag contract.
   aliases, frontmatter/body rewrites, vault staging incl. the whole-vault
   no-UUID guard, orphan/collision fallbacks, zip round-trip; binding
   inventory rows in `docs/test-plans/wiki-export-tests.md`)
-- `tests/wiki/wiki_ingest_test.rs` (6 freeze tests)
+- `tests/wiki/wiki_ingest_test.rs` (65 tests: freeze, batching, local caps/ETA/tick cancel)
 - `tests/wiki/wiki_consolidation_test.rs` (multi-batch consolidation)
 - `tests/wiki/wiki_index_drift_test.rs` (two-tier external-edit drift detection)
 - `tests/wiki/wiki_concepts_tags_test.rs` (11 tests)

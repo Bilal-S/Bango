@@ -328,7 +328,13 @@ OpenAI-compatible). Routing an OpenAI-shaped body to
   drain), `kill_blocking` for exit/`Drop`, and busy accounting. `ServerSpec`,
   `ServerSpawner`, `ServerProcess`, and `HealthProbe` are trait seams so
   lifecycle tests run without a real binary; the child's stdout/stderr append
-  to the engine log (`--log-file` is broken in b10964). Lock rule: the inner
+  to the engine log (`--log-file` is broken in b10964). Drain contract:
+  `DrainTimings { fast, max }` is injectable (production 5 s fast / 30 min
+  detached cap, `LOCAL_DRAIN_MAX_SECS`), deliberately independent of the 60 min
+  request budget, and the loop deadlines use `tokio::time::Instant` so paused
+  tokio time drives them in tests. After the cap the detached
+  `stop_if_unchanged` kills the server and the in-flight request fails with a
+  transport error. Lock rule: the inner
   mutex is NOT reentrant - guard holders must build configs with the private
   `config_from`, never `effective_config` (the T5c self-deadlock fix).
 - `effective_config.rs` (T6) is the resolver: `resolve` / `resolve_no_decrypt`
@@ -348,7 +354,8 @@ OpenAI-compatible). Routing an OpenAI-shaped body to
 - Orchestrator local routing (T6): `set_backend`/`set_backend_initial` +
   `set_local_config_provider` (engine-backed `EngineLocalConfigProvider`);
   `send_with_meta_opts` substitutes the live local config, applies
-  `resolve_timeout` (single 1800 s local override), skips the cloud
+  `resolve_timeout` (single 3600 s local override, because many CPUs are
+  slow), skips the cloud
   temperature latch/persistence, and builds `client::RequestOptions` via
   `local_request_options` (structured calls force `enable_thinking=false`;
   prose honors the toggle). `send_opts(json_mode)` is the JSON-intent seam
@@ -369,6 +376,19 @@ OpenAI-compatible). Routing an OpenAI-shaped body to
   - Figure descriptions (`summary/prompt.rs`): the prompt requests `{"descriptions": [...]}`; `parse_figure_descriptions_response` recovers the same object shapes.
   - Citation Finder / claim splitter already request `{"results": [...]}` / `{"claims": [...]}` and share the lenient `resolve_array` recovery (`citation_finder/prompt.rs`).
   Any new local structured call site must follow this pattern; a bare-array-only parser is a guaranteed live failure on Bango AI.
+- **Local output caps (v9)**: every `bango_ai` call carries `max_tokens` derived from
+  `orchestrator::local_max_tokens_for(request_type)` (WikiIngest 8192, corpus reports /
+  CitationFinder 4096, chat 4096, summary types 3072, classification/structured 2048;
+  embeddings uncapped). This bounds no-EOS/runaway CPU generations (a live wiki batch hit
+  26K tokens with no EOS); the client sends the field only for `LlmProvider::BangoAi`, so
+  cloud paths never receive it. Prose calls with the reasoning toggle ON get 2x headroom
+  because thinking tokens count against the completion cap. A cap hit is visible through
+  `CallMeta::truncated_by_output_budget()`, which the wiki ingest consumes (drop the partial
+  trailing page + bounded continuation). `RequestOptions::max_tokens` defaults to `None`.
+  Wiki batch sizing floors its planning budget to the WikiIngest cap
+  (`wiki/ingest/batching.rs::wiki_batch_output_budget`) so 2 sources share a batch instead of
+  singleton batches re-processing the prompt prefix. This supersedes the earlier "the local
+  path sends no output cap" ruling.
 - Manual `strip_code_fences` calls in JSON-returning command handlers are deprecated; `send_json` handles fence-stripping centrally. The sole remaining direct `strip_code_fences` caller is the summary command's markdown-fallback retry path (prose-shaped, not JSON).
 
 ### `RequestBuilder` cloning

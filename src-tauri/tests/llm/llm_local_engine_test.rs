@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use bango_lib::error::AppError;
 use bango_lib::llm::local::engine::{
-    BangoAiEngine, EngineState, HealthProbe, LoopbackReserver, ServerProcess, ServerSpawner,
-    ServerSpec, SystemReserver, TcpHealthProbe, PORT_RETRIES,
+    BangoAiEngine, DrainTimings, EngineState, HealthProbe, LoopbackReserver, ServerProcess,
+    ServerSpawner, ServerSpec, SystemReserver, TcpHealthProbe, PORT_RETRIES,
 };
 use bango_lib::llm::local::policy::EngineSettings;
 use bango_lib::llm::local::profile::LOCAL_LLM_PROFILE_ID;
@@ -192,18 +192,23 @@ async fn reset_then_restart_leaves_one_child() {
     assert!(engine.generation().expect("generation") >= 2);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn engine_reset_is_off_thread_and_waits_for_in_flight() {
     let drained = Arc::new(AtomicBool::new(false));
     let spawner = Arc::new(FakeSpawner { drain_flag: Some(drained.clone()), ..Default::default() });
-    let engine =
-        Arc::new(BangoAiEngine::with_seams(spawner.clone(), Arc::new(FakeProbe { healthy: true })));
+    let engine = Arc::new(BangoAiEngine::with_seams_reserver_and_drains(
+        spawner.clone(),
+        Arc::new(FakeProbe { healthy: true }),
+        Arc::new(SystemReserver),
+        DrainTimings { fast: Duration::from_secs(10), max: Duration::from_secs(60) },
+    ));
     engine.ensure_started(&spec()).await.expect("starts");
     engine.note_request_start();
     let engine_ref = engine.clone();
     let drained_ref = drained.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(80));
+    // Virtual 2 s: inside the 10 s fast window, so the reset waits for it.
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(2)).await;
         drained_ref.store(true, Ordering::Relaxed);
         engine_ref.note_request_end();
     });
@@ -212,6 +217,46 @@ async fn engine_reset_is_off_thread_and_waits_for_in_flight() {
     assert!(
         spawner.killed_after_drain.load(Ordering::Relaxed),
         "reset must wait for in-flight requests before killing"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn engine_reset_stops_after_teardown_cap_without_drain() {
+    // The teardown cap is separate from the request budget: after it expires
+    // the detached stop kills the server even though the request never ended.
+    let drained = Arc::new(AtomicBool::new(false));
+    let spawner = Arc::new(FakeSpawner { drain_flag: Some(drained.clone()), ..Default::default() });
+    let engine = Arc::new(BangoAiEngine::with_seams_reserver_and_drains(
+        spawner.clone(),
+        Arc::new(FakeProbe { healthy: true }),
+        Arc::new(SystemReserver),
+        DrainTimings { fast: Duration::from_secs(5), max: Duration::from_secs(30) },
+    ));
+    engine.ensure_started(&spec()).await.expect("starts");
+    engine.note_request_start(); // never drains
+    engine.reset_off_thread().await.expect("resets");
+
+    // The fast window elapsed -> the stop moved off-thread; server still running.
+    assert_eq!(engine.state().expect("state"), EngineState::Ready);
+
+    /* Step virtual time in 1 s increments: the detached task starts its
+    deadline on first poll, so a single jump could land before it registers.
+    All waits are virtual (paused time), so this is instant and deterministic. */
+    for _ in 0..60 {
+        if engine.state().expect("state") == EngineState::Stopped
+            && spawner.killed.load(Ordering::Relaxed)
+        {
+            break;
+        }
+        tokio::time::advance(Duration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(engine.state().expect("state"), EngineState::Stopped);
+    assert!(!drained.load(Ordering::Relaxed), "the request never ended");
+    assert!(spawner.killed.load(Ordering::Relaxed), "the server must be killed after the cap");
+    assert!(
+        !spawner.killed_after_drain.load(Ordering::Relaxed),
+        "the cap kill must not wait for a drain that never happens"
     );
 }
 

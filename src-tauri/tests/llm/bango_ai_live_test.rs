@@ -364,7 +364,7 @@ fn bango_ai_figure_description_prompt_parses_under_json_object_grammar() {
 ///
 /// Criteria generation is intentionally absent: on the pinned 9B it looped
 /// past 5,400 generated tokens without an EOS inside the 600 s probe budget
-/// (the documented no-output-cap risk, bounded by the 1800 s local timeout in
+/// (the documented no-EOS risk, bounded by the 60 min local timeout in
 /// production), so it cannot serve as a shape guard yet.
 #[test]
 #[ignore = "slow"]

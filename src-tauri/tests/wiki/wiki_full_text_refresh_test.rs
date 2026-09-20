@@ -200,3 +200,26 @@ fn ensure_summaries_failure_falls_back_to_abstract_with_audit_entry() {
         .unwrap();
     assert!(blob.is_none());
 }
+
+/// A cancelled ingest must leave the wiki stale so the next Update retries;
+/// only a completed run clears the flag.
+#[test]
+fn cancelled_finalize_keeps_wiki_stale() {
+    use bango_lib::wiki::ingest::{finalize_ingest, IngestReport};
+
+    let conn = test_db();
+    mark_wiki_needs_refresh(&conn);
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("wiki")).unwrap();
+    std::fs::write(root.join("wiki/log.md"), "").unwrap();
+
+    let mut cancelled = IngestReport::default();
+    cancelled.errors.push("Cancelled".to_string());
+    finalize_ingest(&conn, root, &mut cancelled).unwrap();
+    assert!(get_wiki_needs_refresh(&conn).unwrap(), "cancel must keep staleness");
+
+    let mut completed = IngestReport::default();
+    finalize_ingest(&conn, root, &mut completed).unwrap();
+    assert!(!get_wiki_needs_refresh(&conn).unwrap(), "completed ingest clears staleness");
+}

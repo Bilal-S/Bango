@@ -152,9 +152,10 @@ async fn multi_batch_ingest_consolidates_cross_batch_duplicates() {
 
 #[tokio::test]
 async fn single_batch_ingest_skips_consolidation() {
-    // When there is only one batch, no consolidation should run even if the
-    // LLM happens to emit two pages with the same slug. This test confirms
-    // the single-batch fast path is untouched.
+    // When there is only one batch, no consolidation pass should run even if
+    // the LLM emits two pages with the same slug. The parser-level repetition
+    // guard collapses the duplicate (last body wins) without the multi-batch
+    // consolidation merge.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     storage::scaffold_tree(root).unwrap();
@@ -187,9 +188,10 @@ async fn single_batch_ingest_skips_consolidation() {
     let report =
         ingest::run_chunked_ingest(root, batches, sender, None, (25, 95), None).await.unwrap();
 
-    // Single-batch path: both pages "written" (count = 2), last-write-wins on
-    // disk. No consolidation happened (otherwise count would be 1).
-    assert_eq!(report.pages_written, 2, "single-batch path should not consolidate");
+    // Single-batch path: no consolidation pass runs (no "Additional
+    // perspectives" merge), but the parser-level repetition guard collapses
+    // the duplicate slug to one page with the last body on disk.
+    assert_eq!(report.pages_written, 1, "repetition guard collapses the duplicate slug");
     let body = std::fs::read_to_string(root.join("wiki/concepts/alpha.md")).unwrap();
     // Last write wins: body two is on disk, body one is NOT merged in.
     assert!(body.contains("Body two."));

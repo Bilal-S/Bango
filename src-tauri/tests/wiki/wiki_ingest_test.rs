@@ -1005,9 +1005,10 @@ async fn run_chunked_ingest_reports_ungrounded_llm_pages() {
 
     // Pages are still written (gate is non-fatal). Provenance-less pages are
     // also uncovered, so the Change 4 coverage guard issues the 2 bounded
-    // continuations, which re-emit the same pages (3 rounds x 3 pages).
+    // continuations, which re-emit the same pages; the parser-level
+    // repetition guard collapses the 3 rounds to 3 unique pages.
     assert_eq!(report.continuation_calls, 2, "{report:?}");
-    assert_eq!(report.pages_written, 9, "{report:?}");
+    assert_eq!(report.pages_written, 3, "{report:?}");
     // But the errors field carries the grounding gate message.
     let has_grounding_err = report
         .errors
@@ -1589,14 +1590,255 @@ async fn ingest_report_records_volume_metrics_and_warns_on_regression() {
     assert_eq!(metrics["pagesByType"]["concept"], 6, "{metrics}");
 
     // Run 2: SinglePageSender covers only art-0; the 2 bounded continuations
-    // re-emit the same art-0 page, so 3 pages survive (< 80% of 6) and the
-    // regression warning must surface.
+    // re-emit the same art-0 page, and the repetition guard collapses all
+    // rounds to 1 page (< 80% of 6), so the regression warning must surface.
     let batches = build_ingest_prompt_batches(root, 128_000, None, false).unwrap();
     let sender: Arc<dyn IngestLlmSender> = Arc::new(SinglePageSender);
     let report = run_chunked_ingest(root, batches, sender, None, (25, 95), None).await.unwrap();
-    assert_eq!(report.pages_written, 3, "{report:?}");
+    assert_eq!(report.pages_written, 1, "{report:?}");
     assert!(
-        report.warnings.iter().any(|w| w.contains("dropped from 6 to 3")),
+        report.warnings.iter().any(|w| w.contains("dropped from 6 to 1")),
         "regression warning missing: {report:?}"
+    );
+}
+
+// ── Local (Bango AI) output bounds + progress ticker helpers ────────────────
+
+#[test]
+fn format_eta_none_until_first_batch_then_extrapolates() {
+    use std::time::Duration;
+
+    use bango_lib::wiki::ingest::batching::format_eta;
+
+    assert_eq!(format_eta(Duration::from_secs(60), 0, 4), None, "no rate yet");
+    assert_eq!(format_eta(Duration::from_secs(60), 1, 1), None, "already done");
+    assert_eq!(format_eta(Duration::from_secs(60), 1, 4).as_deref(), Some("3:00"));
+    assert_eq!(format_eta(Duration::from_secs(45), 3, 8).as_deref(), Some("1:15"));
+    assert_eq!(format_eta(Duration::from_secs(3600), 1, 3).as_deref(), Some("2:00:00"));
+}
+
+#[test]
+fn parse_llm_pages_dedupes_repeated_slugs_keeping_last_body() {
+    // A local model can loop on the same slug; the parser must collapse the
+    // repetition to one page (last body, first position) instead of carrying
+    // duplicates into the writes.
+    let response = "\
+<!-- PAGE:loop -->
+---
+id: loop
+title: \"Loop\"
+type: concept
+slug: loop
+status: draft
+source_articles: [\"a1\"]
+---
+first body
+<!-- PAGE:loop -->
+---
+id: loop
+title: \"Loop\"
+type: concept
+slug: loop
+status: draft
+source_articles: [\"a1\"]
+---
+second body
+";
+    let mut pages = parse_llm_pages(response);
+    assert_eq!(pages.len(), 2, "raw parser keeps every block");
+    bango_lib::wiki::ingest::dedupe_pages_by_slug(&mut pages);
+    assert_eq!(pages.len(), 1, "repeated slug must collapse");
+    assert!(pages[0].body.contains("second body"), "last body wins: {:?}", pages[0].body);
+}
+#[test]
+fn local_sender_lowers_continuation_budget_on_bango_ai() {
+    use bango_lib::llm::orchestrator::LlmOrchestrator;
+    use bango_lib::models::llm_config::LlmProvider;
+    use bango_lib::wiki::ingest::batching::{
+        OrchestratorIngestSender, LOCAL_MAX_CONTINUATIONS_PER_BATCH, MAX_CONTINUATIONS_PER_BATCH,
+    };
+
+    let orchestrator = Arc::new(LlmOrchestrator::new(1, 0));
+    let local =
+        OrchestratorIngestSender::new(orchestrator.clone(), llm_config_for(LlmProvider::BangoAi));
+    let cloud = OrchestratorIngestSender::new(orchestrator, llm_config_for(LlmProvider::Openai));
+    assert_eq!(local.max_continuations(), LOCAL_MAX_CONTINUATIONS_PER_BATCH);
+    assert_eq!(cloud.max_continuations(), MAX_CONTINUATIONS_PER_BATCH);
+}
+
+/// Minimal config for provider-sensitive helpers.
+fn llm_config_for(
+    provider: bango_lib::models::llm_config::LlmProvider,
+) -> bango_lib::models::llm_config::LlmConfig {
+    bango_lib::models::llm_config::LlmConfig {
+        provider,
+        endpoint_url: "http://127.0.0.1:9/v1".to_string(),
+        api_key_encrypted: None,
+        model_name: "test".to_string(),
+        temperature: 0.2,
+        skip_temperature: false,
+        max_concurrent_requests: 1,
+        request_delay_ms: 0,
+        context_window_tokens: 8_192,
+    }
+}
+
+#[test]
+fn local_wiki_batches_hold_two_sources_after_cap_raise() {
+    use bango_lib::models::llm_config::LlmProvider;
+    use bango_lib::wiki::ingest::batching::{max_articles_per_batch, wiki_batch_output_budget};
+
+    // The 8192 local ceiling sizes batches at floor(0.7*8192/2200) = 2 sources,
+    // amortizing the shared prompt prefix and allowing cross-source synthesis.
+    assert_eq!(max_articles_per_batch(15, 8192), 2);
+    // Regression pin: the earlier 4096 ceiling forced singleton local batches.
+    assert_eq!(max_articles_per_batch(15, 4096), 1);
+
+    assert_eq!(wiki_batch_output_budget(&llm_config_for(LlmProvider::BangoAi)), 8192);
+    assert_eq!(wiki_batch_output_budget(&llm_config_for(LlmProvider::Openai)), 32_768);
+}
+
+#[tokio::test(start_paused = true)]
+async fn tick_interval_cancels_mid_generation() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    use bango_lib::wiki::ingest::batching::{
+        run_chunked_ingest_with_progress, IngestProgressConfig,
+    };
+
+    /// Never returns on its own: only the tick's cancel poll can end the run.
+    struct HangingSender;
+    #[async_trait]
+    impl IngestLlmSender for HangingSender {
+        async fn send(&self, _prompt: &str) -> Result<String, AppError> {
+            tokio::time::sleep(Duration::from_secs(3600)).await;
+            Ok(String::new())
+        }
+    }
+
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    bango_lib::wiki::storage::scaffold_tree(root).unwrap();
+    std::fs::write(root.join("AGENTS.md"), "# Contract").unwrap();
+    write_many_sources(root, 1, 100);
+    let batches = ingest::build_ingest_prompt_batches(root, 50_000, None, false).unwrap();
+    assert_eq!(batches.len(), 1);
+
+    /* Paused tokio time: the 30 s cancel signal and the 5 s ticks are virtual,
+    so the test is deterministic and instant without wall-clock waits. */
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_for_task = Arc::clone(&cancel);
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        cancel_for_task.store(true, Ordering::SeqCst);
+    });
+
+    let sender: Arc<dyn IngestLlmSender> = Arc::new(HangingSender);
+    let report = run_chunked_ingest_with_progress(
+        root,
+        batches,
+        sender,
+        None,
+        (25, 95),
+        Some(&cancel),
+        IngestProgressConfig::production(Duration::from_secs(3600)),
+    )
+    .await
+    .unwrap();
+
+    assert!(cancel.load(Ordering::SeqCst), "the virtual cancel signal must have fired");
+    assert!(report.errors.iter().any(|e| e == "Cancelled"), "{report:?}");
+}
+
+#[test]
+fn progress_tick_message_formats_batch_age_limit_and_eta() {
+    use std::time::Duration;
+
+    use bango_lib::wiki::ingest::batching::{
+        format_duration, progress_tick_message, slow_batch_threshold, IngestProgressConfig,
+    };
+
+    assert_eq!(format_duration(Duration::from_secs(75)), "1:15");
+    assert_eq!(format_duration(Duration::from_secs(3725)), "1:02:05");
+
+    // Local: 60-min limit -> slow threshold capped at 5 min.
+    let local = IngestProgressConfig::production(Duration::from_secs(3600));
+    assert_eq!(local.tick, Duration::from_secs(5));
+    assert_eq!(slow_batch_threshold(local.call_timeout), Duration::from_secs(300));
+    assert_eq!(
+        progress_tick_message(
+            0,
+            8,
+            Duration::from_secs(45),
+            Duration::from_secs(45),
+            false,
+            &local
+        ),
+        "Generating (batch 1/8, 0:45) via LLM..."
+    );
+    assert_eq!(
+        progress_tick_message(
+            0,
+            8,
+            Duration::from_secs(360),
+            Duration::from_secs(360),
+            false,
+            &local
+        ),
+        "Generating (batch 1/8, 6:00, slow - limit 60:00) via LLM..."
+    );
+
+    // Provider: 10-min limit -> slow threshold 40% = 4 min, limit 10:00.
+    let provider = IngestProgressConfig::production(Duration::from_secs(600));
+    assert_eq!(slow_batch_threshold(provider.call_timeout), Duration::from_secs(240));
+    assert_eq!(
+        progress_tick_message(
+            2,
+            8,
+            Duration::from_secs(300),
+            Duration::from_secs(900),
+            false,
+            &provider
+        ),
+        "Generating (batch 3/8, 5:00, slow - limit 10:00) via LLM..."
+    );
+
+    // ETA half, plus the pre-first-completion unknown state.
+    assert_eq!(
+        progress_tick_message(
+            2,
+            8,
+            Duration::from_secs(10),
+            Duration::from_secs(300),
+            true,
+            &provider
+        ),
+        "Estimating 15:00 to go..."
+    );
+    assert_eq!(
+        progress_tick_message(
+            0,
+            8,
+            Duration::from_secs(10),
+            Duration::from_secs(10),
+            true,
+            &provider
+        ),
+        "Estimating time to go..."
+    );
+
+    // Unknown timeout: slow suffix without a limit.
+    let unknown = IngestProgressConfig { tick: Duration::from_secs(5), call_timeout: None };
+    assert_eq!(
+        progress_tick_message(
+            0,
+            2,
+            Duration::from_secs(301),
+            Duration::from_secs(301),
+            false,
+            &unknown
+        ),
+        "Generating (batch 1/2, 5:01, slow) via LLM..."
     );
 }

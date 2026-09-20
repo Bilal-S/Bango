@@ -22,6 +22,10 @@ struct ChatRequest {
     response_format: Option<ResponseFormat>,
     #[serde(skip_serializing_if = "Option::is_none")]
     chat_template_kwargs: Option<ChatTemplateKwargs>,
+    /// Local Bango AI output cap (llama-server `max_tokens`). Never sent on
+    /// cloud providers: some OpenAI-compatible models reject the field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -45,6 +49,11 @@ pub struct RequestOptions {
     /// `Some(false)` sends `chat_template_kwargs.enable_thinking = false`;
     /// `None` leaves the server default (thinking on).
     pub enable_thinking: Option<bool>,
+    /// Local output cap. Bounds runaway/no-EOS generations on Bango AI; the
+    /// server reports `finish_reason: "length"`, which `CallMeta` surfaces so
+    /// callers can handle truncation (wiki drops the partial page and
+    /// continues). Never sent on cloud paths.
+    pub max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -384,7 +393,9 @@ pub fn estimated_output_budget_tokens(config: &LlmConfig) -> usize {
     }
     match config.provider {
         // Local endpoints usually default to small output budgets; Bango AI
-        // runs a 9B CPU model and is included with the local providers.
+        // runs the pinned on-device model (Qwen3.5-2B) and is included with
+        // the local providers. The orchestrator's `local_max_tokens_for` is the
+        // actual wire cap; this estimate stays the planning number.
         LlmProvider::Ollama
         | LlmProvider::LlamaCpp
         | LlmProvider::LmStudio
@@ -1169,6 +1180,9 @@ async fn send_openai_compatible(
     } else {
         None
     };
+    /* Output cap is local-only: llama-server bounds a runaway generation while
+    cloud transports keep the historic no-field behavior. */
+    let max_tokens = if local { options.max_tokens } else { None };
 
     /* Build + send, then recover from temperature-rejection 400. Same envelope
     as `send_google`; the closure captures the OpenAI-compatible request shape. */
@@ -1190,6 +1204,7 @@ async fn send_openai_compatible(
                 temperature: temp,
                 response_format,
                 chat_template_kwargs,
+                max_tokens,
             };
             let builder = client
                 .post(&endpoint)

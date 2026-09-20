@@ -21,8 +21,8 @@ use bango_lib::llm::local::engine::{
 };
 use bango_lib::llm::local::policy::{EngineSettings, ALLOWED_CONTEXTS};
 use bango_lib::llm::orchestrator::{
-    local_request_options, resolve_timeout, LlmOrchestrator, LlmRequestType, LocalConfigProvider,
-    TemperatureFlagPersister, LOCAL_TIMEOUT_SECS,
+    local_max_tokens_for, local_request_options, resolve_timeout, LlmOrchestrator, LlmRequestType,
+    LocalConfigProvider, TemperatureFlagPersister, LOCAL_TIMEOUT_SECS,
 };
 use bango_lib::models::llm_config::{LlmConfig, LlmProvider};
 use rusqlite::Connection;
@@ -426,6 +426,111 @@ async fn local_send_json_sends_response_format_json_object() {
         .expect("json call succeeds");
     assert_eq!(content, "{\"ok\":true}");
     mock.assert_async().await;
+}
+
+#[test]
+fn local_output_caps_cover_summary_and_wiki_types() {
+    assert_eq!(local_max_tokens_for(&LlmRequestType::WikiIngest), Some(8192));
+    assert_eq!(local_max_tokens_for(&LlmRequestType::ArticleSummary), Some(3072));
+    assert_eq!(local_max_tokens_for(&LlmRequestType::SectionSummary), Some(3072));
+    assert_eq!(local_max_tokens_for(&LlmRequestType::Chat), Some(4096));
+    assert_eq!(local_max_tokens_for(&LlmRequestType::WikiChat), Some(4096));
+    assert_eq!(local_max_tokens_for(&LlmRequestType::CitationFinder), Some(4096));
+    assert_eq!(local_max_tokens_for(&LlmRequestType::GapAnalysis), Some(4096));
+    assert_eq!(local_max_tokens_for(&LlmRequestType::Screening), Some(2048));
+    assert_eq!(local_max_tokens_for(&LlmRequestType::EnhancedScreening), Some(2048));
+    assert_eq!(local_max_tokens_for(&LlmRequestType::Embedding), None);
+}
+
+#[tokio::test]
+async fn reasoning_enabled_doubles_the_local_cap() {
+    // Thinking tokens count against max_tokens; a prose call with the reasoning
+    // toggle ON gets 2x headroom (Chat 4096 -> 8192 on the wire).
+    let mut server = mockito::Server::new_async().await;
+    let reasoning_mock = server
+        .mock("POST", "/v1/chat/completions")
+        .match_body(mockito::Matcher::AllOf(vec![
+            mockito::Matcher::Regex("\"max_tokens\"".to_string()),
+            mockito::Matcher::Regex("8192".to_string()),
+        ]))
+        .with_status(200)
+        .with_body(chat_body("local-ok", 5))
+        .create_async()
+        .await;
+
+    let orchestrator = LlmOrchestrator::new(1, 0);
+    orchestrator.set_backend_initial(LlmBackend::BangoAi);
+    orchestrator.set_local_config_provider(Arc::new(StubLocalProvider {
+        config: local_config(&format!("{}/v1", server.url())),
+        reasoning: true,
+        calls: Arc::new(AtomicUsize::new(0)),
+    }));
+    let _ = orchestrator
+        .send(
+            &local_config(&format!("{}/v1", server.url())),
+            "system",
+            "user",
+            LlmRequestType::Chat,
+        )
+        .await
+        .expect("reasoning chat call succeeds");
+    reasoning_mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn local_calls_carry_the_output_cap_cloud_calls_never_do() {
+    // Local WikiIngest sends max_tokens 8192.
+    let mut server = mockito::Server::new_async().await;
+    let local_mock = server
+        .mock("POST", "/v1/chat/completions")
+        .match_body(mockito::Matcher::AllOf(vec![
+            mockito::Matcher::Regex("\"max_tokens\"".to_string()),
+            mockito::Matcher::Regex("8192".to_string()),
+        ]))
+        .with_status(200)
+        .with_body(chat_body("local-ok", 5))
+        .create_async()
+        .await;
+
+    let orchestrator = LlmOrchestrator::new(1, 0);
+    orchestrator.set_backend_initial(LlmBackend::BangoAi);
+    orchestrator.set_local_config_provider(Arc::new(StubLocalProvider {
+        config: local_config(&format!("{}/v1", server.url())),
+        reasoning: false,
+        calls: Arc::new(AtomicUsize::new(0)),
+    }));
+    let _ = orchestrator
+        .send(
+            &local_config(&format!("{}/v1", server.url())),
+            "system",
+            "user",
+            LlmRequestType::WikiIngest,
+        )
+        .await
+        .expect("local wiki call succeeds");
+    local_mock.assert_async().await;
+
+    // Cloud calls never receive the field: the max_tokens matcher must stay at
+    // zero calls while the catch-all serves the cloud request.
+    orchestrator.set_backend(LlmBackend::ConfiguredProvider, None).await;
+    let cloud_mock = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::Regex("\"max_tokens\"".to_string()))
+        .expect(0)
+        .create_async()
+        .await;
+    let cloud_ok = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(chat_body("cloud-ok", 5))
+        .create_async()
+        .await;
+    let _ = orchestrator
+        .send_opts(&cloud_config(&server.url()), "system", "user", LlmRequestType::Chat, false)
+        .await
+        .expect("cloud call succeeds");
+    cloud_mock.assert_async().await;
+    cloud_ok.assert_async().await;
 }
 
 #[test]

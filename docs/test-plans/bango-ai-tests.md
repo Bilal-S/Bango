@@ -59,8 +59,8 @@ marker in the test file identifies un-implemented rows.
 |---|---|
 | `src-tauri/tests/llm/llm_backend_routing_test.rs::orchestrator_uses_bango_ai_config_when_selected` | Effective local config is used and the stored cloud config is untouched |
 | `src-tauri/tests/llm/llm_backend_routing_test.rs::orchestrator_uses_stored_config_by_default` | Default backend behavior is byte-identical to today |
-| `src-tauri/tests/llm/llm_backend_routing_test.rs::local_concurrency_and_timeout_overrides_apply` | Concurrency 1 and the 1800 s timeout apply only to the local backend |
-| `src-tauri/tests/llm/llm_backend_routing_test.rs::local_timeout_override_covers_every_request_type` | Every generation `LlmRequestType` variant (today 120/120/60/600 s) resolves the 1800 s local override |
+| `src-tauri/tests/llm/llm_backend_routing_test.rs::local_concurrency_and_timeout_overrides_apply` | Concurrency 1 and the 3600 s timeout apply only to the local backend |
+| `src-tauri/tests/llm/llm_backend_routing_test.rs::local_timeout_override_covers_every_request_type` | Every generation `LlmRequestType` variant (today 120/120/60/600 s) resolves the 3600 s local override |
 | `src-tauri/tests/llm/llm_backend_routing_test.rs::unsupported_target_blocks_generation_without_cloud_fallback` | Persisted bango_ai on an unsupported machine returns an actionable error and never sends to the stored cloud endpoint |
 | `src-tauri/tests/llm/llm_backend_routing_test.rs::save_llm_config_rejects_the_bango_ai_runtime_provider` | The runtime-only provider can never be persisted |
 | `src-tauri/tests/llm/llm_backend_routing_test.rs::effective_context_window_prevents_oversized_local_prompts` | A stored 50k cloud row cannot budget prompts against the 16k local window; call sites use effective_config::resolve and the window helper agrees |

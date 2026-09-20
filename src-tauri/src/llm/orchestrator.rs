@@ -56,9 +56,11 @@ pub trait LocalConfigProvider: Send + Sync {
     fn note_request_end(&self) {}
 }
 
-/// Local requests get a much longer wall-clock budget: a 9B CPU model can
-/// exceed every cloud per-type cap (screening 120 s, split 60 s).
-pub const LOCAL_TIMEOUT_SECS: u64 = 1800;
+/// Local requests get a much longer wall-clock budget: many CPUs are slow, and
+/// the pinned on-device model can exceed every cloud per-type cap (screening
+/// 120 s, split 60 s). 60 minutes; per-call `max_tokens` caps bound the actual
+/// generation, and engine teardown uses a separate shorter bound.
+pub const LOCAL_TIMEOUT_SECS: u64 = 3600;
 
 /// Wall-clock timeout for one call: the single local override or the cloud
 /// per-request-type value.
@@ -79,6 +81,50 @@ pub fn local_request_options(json_mode: bool, reasoning_enabled: bool) -> client
     client::RequestOptions {
         json_mode,
         enable_thinking: if json_mode || !reasoning_enabled { Some(false) } else { None },
+        max_tokens: None,
+    }
+}
+
+/// Output cap for local (Bango AI) calls, per request type. Bounds runaway
+/// no-EOS generations on the pinned CPU model; a hit is surfaced through
+/// `CallMeta::truncated_by_output_budget()` so callers can handle truncation
+/// (the wiki ingest drops the partial trailing page and re-dispatches).
+/// `None` = server default (no cap). Cloud paths never see this field.
+///
+/// WikiIngest gets the largest cap so 2-3 sources share one prompt prefix
+/// (`wiki_batch_output_budget` in `wiki/ingest/batching.rs` sizes batches for
+/// it); chat gets 4096 because it is interactive; classification calls that
+/// emit bounded per-item payloads keep 2048.
+#[must_use]
+pub fn local_max_tokens_for(request_type: &LlmRequestType) -> Option<u32> {
+    match request_type {
+        // Large page-set output; sized for ~2 sources per batch.
+        LlmRequestType::WikiIngest => Some(8192),
+        // Corpus-wide / multi-item reports and classifications.
+        LlmRequestType::GapAnalysis | LlmRequestType::CitationFinder => Some(4096),
+        // Interactive prose: the user is present and can stop the request.
+        LlmRequestType::Chat | LlmRequestType::WikiChat => Some(4096),
+        // Multi-section JSON summaries are the next largest outputs.
+        LlmRequestType::AiSummary
+        | LlmRequestType::ArticleSummary
+        | LlmRequestType::SummaryGeneration
+        | LlmRequestType::SectionSummary
+        | LlmRequestType::UnifiedSummary
+        | LlmRequestType::ClusterThematicAnalysis => Some(3072),
+        // Bounded structured/classification/extraction calls.
+        LlmRequestType::Screening
+        | LlmRequestType::EnhancedScreening
+        | LlmRequestType::TagGeneration
+        | LlmRequestType::LabelGeneration
+        | LlmRequestType::CriteriaGeneration
+        | LlmRequestType::TestConnection
+        | LlmRequestType::FigureDescription
+        | LlmRequestType::Translation
+        | LlmRequestType::SearchStrategy
+        | LlmRequestType::OpenAlexSmartSearch
+        | LlmRequestType::CitationFinderSplit => Some(2048),
+        // Embeddings never use the chat path; no cap applies.
+        LlmRequestType::Embedding => None,
     }
 }
 
@@ -363,7 +409,15 @@ impl LlmOrchestrator {
         };
         let reasoning_enabled = provider.as_ref().is_some_and(|p| p.reasoning_enabled());
         let options = if local {
-            local_request_options(json_mode, reasoning_enabled)
+            let mut options = local_request_options(json_mode, reasoning_enabled);
+            options.max_tokens = local_max_tokens_for(&request_type);
+            /* Thinking tokens count against `max_tokens`. Structured calls
+            force thinking off; prose with the reasoning toggle ON leaves
+            thinking enabled, so double the headroom there. */
+            if options.enable_thinking.is_none() {
+                options.max_tokens = options.max_tokens.map(|cap| cap.saturating_mul(2));
+            }
+            options
         } else {
             client::RequestOptions::default()
         };
@@ -401,7 +455,7 @@ impl LlmOrchestrator {
         };
 
         // 4. Make the actual LLM call with a per-request-type timeout (local
-        // requests use the single 1800 s local override).
+        // requests use the single 3600 s local override).
         let timeout = resolve_timeout(&request_type, local);
         let timeout_secs = timeout.as_secs();
         eprintln!(

@@ -11,8 +11,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::time::Instant;
 
 use crate::db::connection::lock_state;
 use crate::error::AppError;
@@ -52,14 +54,33 @@ const MAX_RESTARTS: u8 = 1;
 
 /// Fast drain window before a reset stops waiting in-line; a busy engine
 /// finishes its stop on a detached task so callers return promptly.
-const IN_FLIGHT_DRAIN_FAST: Duration = Duration::from_secs(5);
+pub const IN_FLIGHT_DRAIN_FAST: Duration = Duration::from_secs(5);
 
 /// Poll cadence while draining in-flight local requests.
 const IN_FLIGHT_DRAIN_POLL: Duration = Duration::from_millis(25);
 
-/// Ceiling for the detached drain: no local request may outlive its own
-/// 1800 s wall-clock budget (`orchestrator::LOCAL_TIMEOUT_SECS`).
-const LOCAL_DRAIN_MAX: Duration = Duration::from_secs(crate::llm::orchestrator::LOCAL_TIMEOUT_SECS);
+/// Ceiling for the detached drain. Deliberately SEPARATE from (and shorter
+/// than) the 60 min local request budget (`orchestrator::LOCAL_TIMEOUT_SECS`):
+/// an explicit backend switch or settings reset must never wait an hour for a
+/// stuck generation. After this bound the server is stopped anyway and the
+/// in-flight request fails with a transport error.
+pub const LOCAL_DRAIN_MAX_SECS: u64 = 1800;
+
+/// Drain timings for `reset_off_thread`. Injecting them keeps teardown tests
+/// deterministic on paused tokio time (no wall-clock waits).
+#[derive(Debug, Clone, Copy)]
+pub struct DrainTimings {
+    /// In-line wait before the stop moves to a detached task.
+    pub fast: Duration,
+    /// Detached wait before the server is stopped regardless of in-flight work.
+    pub max: Duration,
+}
+
+impl Default for DrainTimings {
+    fn default() -> Self {
+        Self { fast: IN_FLIGHT_DRAIN_FAST, max: Duration::from_secs(LOCAL_DRAIN_MAX_SECS) }
+    }
+}
 
 /// Logical prompt batch (`--batch-size`). llama.cpp defaults to 2048; 1024
 /// keeps prefill chunks aligned with the physical batch without over-allocating
@@ -175,6 +196,7 @@ pub struct BangoAiEngine {
     spawner: Arc<dyn ServerSpawner>,
     probe: Arc<dyn HealthProbe>,
     reserver: Arc<dyn LoopbackReserver>,
+    drains: DrainTimings,
 }
 
 impl Default for BangoAiEngine {
@@ -203,6 +225,18 @@ impl BangoAiEngine {
         probe: Arc<dyn HealthProbe>,
         reserver: Arc<dyn LoopbackReserver>,
     ) -> Self {
+        Self::with_seams_reserver_and_drains(spawner, probe, reserver, DrainTimings::default())
+    }
+
+    /// Test seam constructor with injectable drain timings (paused-time
+    /// teardown tests).
+    #[must_use]
+    pub fn with_seams_reserver_and_drains(
+        spawner: Arc<dyn ServerSpawner>,
+        probe: Arc<dyn HealthProbe>,
+        reserver: Arc<dyn LoopbackReserver>,
+        drains: DrainTimings,
+    ) -> Self {
         let reserved = reserver.reserve().ok();
         let port = reserved.as_ref().map_or(0, |(port, _)| *port);
         let listener = reserved.map(|(_, listener)| listener);
@@ -226,6 +260,7 @@ impl BangoAiEngine {
             spawner,
             probe,
             reserver,
+            drains,
         }
     }
 
@@ -420,12 +455,13 @@ impl BangoAiEngine {
 
     /// Reset for backend switch / settings change: wait briefly for in-flight
     /// requests, then stop the server. If a local generation is still running
-    /// past the fast window, the stop continues on a detached task that waits
-    /// for it to finish (bounded by the local request budget) - plan section
-    /// 19: an in-flight local request finishes, and the UI never blocks on
-    /// teardown.
+    /// past the fast window, the stop continues on a detached task bounded by
+    /// the separate teardown cap (`DrainTimings::max`, 30 min) - NOT the 60 min
+    /// request budget. After the cap the server stops anyway and the in-flight
+    /// request fails with a transport error; callers never block on teardown.
     pub async fn reset_off_thread(self: &Arc<Self>) -> Result<(), AppError> {
-        let deadline = Instant::now() + IN_FLIGHT_DRAIN_FAST;
+        let drains = self.drains;
+        let deadline = Instant::now() + drains.fast;
         while self.in_flight.load(Ordering::Relaxed) > 0 && Instant::now() < deadline {
             tokio::time::sleep(IN_FLIGHT_DRAIN_POLL).await;
         }
@@ -435,7 +471,7 @@ impl BangoAiEngine {
         let engine = Arc::clone(self);
         let observed = engine.generation().unwrap_or(0);
         tokio::spawn(async move {
-            let deadline = Instant::now() + LOCAL_DRAIN_MAX;
+            let deadline = Instant::now() + drains.max;
             while engine.in_flight.load(Ordering::Relaxed) > 0 && Instant::now() < deadline {
                 tokio::time::sleep(IN_FLIGHT_DRAIN_POLL).await;
             }

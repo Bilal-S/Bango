@@ -27,6 +27,14 @@ use super::{
     WikiIngestState, WIKI_PIPELINE_TOTAL_STEPS,
 };
 
+/// True when the effective generation config is the on-device Bango AI
+/// backend. Local runs skip the heaviest optional LLM work (per-article
+/// full-text summaries, per-framework polish) and size wiki batches for the
+/// local output cap.
+fn is_local_config(config: &crate::models::llm_config::LlmConfig) -> bool {
+    config.provider == crate::models::llm_config::LlmProvider::BangoAi
+}
+
 /// Progress callback for the `build_batches_with_manifest` pre-seed phases.
 ///
 /// Mirrors `ChunkProgressCb` in `commands/full_text.rs`. The callback receives
@@ -122,11 +130,21 @@ async fn wiki_ingest_inner(
         )?
     };
     // Framework polish pass: one LLM call per framework, outside the DB lock.
+    // Skipped on Bango AI: the deterministic framework skeletons stay, and the
+    // serialized CPU calls are not worth the minutes.
     if !skip_llm && !framework_rows.is_empty() {
-        let polished =
-            ingest::polish_framework_pages(framework_rows, &root, orchestrator.inner(), &config)
-                .await?;
-        eprintln!("[wiki:diag] framework pages polished: {polished}");
+        if is_local_config(&config) {
+            eprintln!("[wiki:diag] framework polish skipped (Bango AI)");
+        } else {
+            let polished = ingest::polish_framework_pages(
+                framework_rows,
+                &root,
+                orchestrator.inner(),
+                &config,
+            )
+            .await?;
+            eprintln!("[wiki:diag] framework pages polished: {polished}");
+        }
     }
     if is_cancelled(cancel) {
         let mut report = ingest::IngestReport::default();
@@ -147,10 +165,22 @@ async fn wiki_ingest_inner(
         emit_wiki_progress(app_handle, 50, "LLM not configured, skipping synthesis");
         r
     } else {
+        let call_timeout = crate::llm::orchestrator::resolve_timeout(
+            &crate::llm::orchestrator::LlmRequestType::WikiIngest,
+            is_local_config(&config),
+        );
         let sender: Arc<dyn ingest::IngestLlmSender> =
             Arc::new(ingest::OrchestratorIngestSender::new(orchestrator.inner().clone(), config));
-        ingest::run_chunked_ingest(&root, batches, sender, Some(app_handle), (25, 95), cancel)
-            .await?
+        ingest::run_chunked_ingest_with_progress(
+            &root,
+            batches,
+            sender,
+            Some(app_handle),
+            (25, 95),
+            cancel,
+            ingest::IngestProgressConfig::production(call_timeout),
+        )
+        .await?
     };
 
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
@@ -225,12 +255,28 @@ pub fn record_wiki_summary_failure(
 /// the wiki export carries summary-scale content (full text is never sent).
 /// Per-article failures are non-fatal (audit entry + abstract fallback).
 /// Emits `wiki:progress` in the 1-9% slice; cancel-checked between articles.
+///
+/// Returns the number of full-text articles whose summary generation was
+/// skipped because the backend is local (`is_local`), so the caller can warn
+/// that the wiki export uses abstracts for them.
 async fn ensure_wiki_summaries(
     db_state: &tauri::State<'_, DbState>,
     orchestrator: &tauri::State<'_, std::sync::Arc<crate::llm::orchestrator::LlmOrchestrator>>,
     app_handle: &tauri::AppHandle,
     cancel: Option<&Arc<AtomicBool>>,
-) -> Result<(), AppError> {
+    is_local: bool,
+) -> Result<usize, AppError> {
+    /* Bango AI: skip the per-article full-text summary pass. Each summary is a
+    long prompt plus a long generation on serialized CPU inference; the raw
+    export falls back to the article abstract, which is the documented
+    degraded-but-correct input. The missing-summary count is returned so the
+    ingest report discloses the abstract-only fallback. */
+    if is_local {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        let skipped = wiki_articles_missing_summary(&conn)?.len();
+        eprintln!("[wiki:diag] ensure-summaries skipped (Bango AI): {skipped} article(s)");
+        return Ok(skipped);
+    }
     let targets = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         wiki_articles_missing_summary(&conn)?
@@ -238,7 +284,7 @@ async fn ensure_wiki_summaries(
     let total = targets.len();
     for (i, article_id) in targets.into_iter().enumerate() {
         if is_cancelled(cancel) {
-            return Ok(());
+            return Ok(0);
         }
         emit_wiki_progress(
             app_handle,
@@ -259,7 +305,7 @@ async fn ensure_wiki_summaries(
             let _ = record_wiki_summary_failure(&conn, &article_id, &e.to_string());
         }
     }
-    Ok(())
+    Ok(0)
 }
 
 /// Wiki ensure-frameworks query: included full-text articles whose blob
@@ -627,8 +673,9 @@ fn build_batches_with_manifest(
     }
     let methods_pre_seeded = methods_written > 0;
     // Two-sided sizing (wikifix-final Change 4.4): planning-only estimate,
-    // nothing is sent to the provider.
-    let output_budget = crate::llm::client::estimated_output_budget_tokens(config);
+    // nothing is sent to the provider. Local (Bango AI) runs floor it to the
+    // local output cap so batches stay bounded.
+    let output_budget = ingest::wiki_batch_output_budget(config);
     if manifest.entries.is_empty() {
         ingest::build_ingest_prompt_batches_with_budgets(
             root,
@@ -707,14 +754,6 @@ async fn wiki_rebuild_inner(
         let _ = ensure_initialized(&root);
     }
 
-    // Step 0.5 (wikifix-final Change 1): ensure every included full-text
-    // article has an AI-summary blob before export; the wiki LLM never sees
-    // full text. Skipped when the LLM is not configured (abstract fallback).
-    if !skip_llm {
-        ensure_wiki_summaries(db_state, orchestrator, app_handle, cancel).await?;
-        ensure_wiki_frameworks(db_state, orchestrator, app_handle, cancel).await?;
-    }
-
     // Step 1: Lock briefly to load articles + config, then release so the
     // CPU-bound extraction runs lock-free. Per-article progress events fire
     // in the 10-15% range so the user sees "Exporting article N of M..." instead
@@ -730,6 +769,24 @@ async fn wiki_rebuild_inner(
         })?;
         (root, articles, config)
     };
+
+    // Step 0.5 (wikifix-final Change 1): ensure every included full-text
+    // article has an AI-summary blob before export; the wiki LLM never sees
+    // full text. Skipped when the LLM is not configured (abstract fallback).
+    // Under Bango AI the whole pass is skipped and the returned count becomes
+    // an abstract-only warning on the report.
+    let mut summary_skips = 0usize;
+    if !skip_llm {
+        summary_skips = ensure_wiki_summaries(
+            db_state,
+            orchestrator,
+            app_handle,
+            cancel,
+            is_local_config(&config),
+        )
+        .await?;
+        ensure_wiki_frameworks(db_state, orchestrator, app_handle, cancel).await?;
+    }
     emit_wiki_progress(app_handle, 10, "Wiki directory ready");
 
     {
@@ -780,11 +837,21 @@ async fn wiki_rebuild_inner(
         )?
     };
     // Framework polish pass: one LLM call per framework, outside the DB lock.
+    // Skipped on Bango AI: the deterministic framework skeletons stay, and the
+    // serialized CPU calls are not worth the minutes.
     if !skip_llm && !framework_rows.is_empty() {
-        let polished =
-            ingest::polish_framework_pages(framework_rows, &root, orchestrator.inner(), &config)
-                .await?;
-        eprintln!("[wiki:diag] framework pages polished: {polished}");
+        if is_local_config(&config) {
+            eprintln!("[wiki:diag] framework polish skipped (Bango AI)");
+        } else {
+            let polished = ingest::polish_framework_pages(
+                framework_rows,
+                &root,
+                orchestrator.inner(),
+                &config,
+            )
+            .await?;
+            eprintln!("[wiki:diag] framework pages polished: {polished}");
+        }
     }
     if is_cancelled(cancel) {
         let mut report = ingest::IngestReport::default();
@@ -804,12 +871,31 @@ async fn wiki_rebuild_inner(
         emit_wiki_progress(app_handle, 50, "LLM not configured, skipping synthesis");
         r
     } else {
+        let call_timeout = crate::llm::orchestrator::resolve_timeout(
+            &crate::llm::orchestrator::LlmRequestType::WikiIngest,
+            is_local_config(&config),
+        );
         let sender: Arc<dyn ingest::IngestLlmSender> =
             Arc::new(ingest::OrchestratorIngestSender::new(orchestrator.inner().clone(), config));
         emit_wiki_progress(app_handle, 25, "Generating wiki pages via LLM...");
-        ingest::run_chunked_ingest(&root, batches, sender, Some(app_handle), (25, 95), cancel)
-            .await?
+        ingest::run_chunked_ingest_with_progress(
+            &root,
+            batches,
+            sender,
+            Some(app_handle),
+            (25, 95),
+            cancel,
+            ingest::IngestProgressConfig::production(call_timeout),
+        )
+        .await?
     };
+
+    if summary_skips > 0 {
+        report.warnings.push(format!(
+            "{summary_skips} full-text article(s) have no AI summary; Bango AI uses their \
+             abstracts for the wiki export."
+        ));
+    }
 
     // Step 3: Finalize (FTS5 rebuild + log + clear staleness).
     emit_wiki_progress(app_handle, 95, "Indexing pages...");
@@ -872,14 +958,6 @@ async fn wiki_export_and_ingest_inner(
 
     emit_wiki_progress(app_handle, 0, "Preparing raw sources...");
 
-    // Ensure-summaries pre-phase (wikifix-final Change 1): generate missing
-    // blobs before the article load below so exports carry summary-scale
-    // content. Skipped when the LLM is not configured (abstract fallback).
-    if !skip_llm {
-        ensure_wiki_summaries(db_state, orchestrator, app_handle, cancel).await?;
-        ensure_wiki_frameworks(db_state, orchestrator, app_handle, cancel).await?;
-    }
-
     // Lock briefly to load articles + config, then release so the CPU-bound
     // extraction runs lock-free. Per-article progress events fire in the
     // 10-15% range. Cancel is checked before each article.
@@ -894,6 +972,24 @@ async fn wiki_export_and_ingest_inner(
         })?;
         (root, articles, config)
     };
+
+    // Ensure-summaries pre-phase (wikifix-final Change 1): generate missing
+    // blobs before the export below so exports carry summary-scale content.
+    // Skipped when the LLM is not configured (abstract fallback). Under Bango
+    // AI the whole pass is skipped and the returned count becomes an
+    // abstract-only warning on the report.
+    let mut summary_skips = 0usize;
+    if !skip_llm {
+        summary_skips = ensure_wiki_summaries(
+            db_state,
+            orchestrator,
+            app_handle,
+            cancel,
+            is_local_config(&config),
+        )
+        .await?;
+        ensure_wiki_frameworks(db_state, orchestrator, app_handle, cancel).await?;
+    }
 
     // Self-heal: ensure AGENTS.md exists so the wiki-view UI does not gate
     // the generated pages behind the "Initialize" empty-state.
@@ -946,11 +1042,21 @@ async fn wiki_export_and_ingest_inner(
         )?
     };
     // Framework polish pass: one LLM call per framework, outside the DB lock.
+    // Skipped on Bango AI: the deterministic framework skeletons stay, and the
+    // serialized CPU calls are not worth the minutes.
     if !skip_llm && !framework_rows.is_empty() {
-        let polished =
-            ingest::polish_framework_pages(framework_rows, &root, orchestrator.inner(), &config)
-                .await?;
-        eprintln!("[wiki:diag] framework pages polished: {polished}");
+        if is_local_config(&config) {
+            eprintln!("[wiki:diag] framework polish skipped (Bango AI)");
+        } else {
+            let polished = ingest::polish_framework_pages(
+                framework_rows,
+                &root,
+                orchestrator.inner(),
+                &config,
+            )
+            .await?;
+            eprintln!("[wiki:diag] framework pages polished: {polished}");
+        }
     }
     if is_cancelled(cancel) {
         let mut report = ingest::IngestReport::default();
@@ -970,12 +1076,31 @@ async fn wiki_export_and_ingest_inner(
         emit_wiki_progress(app_handle, 50, "LLM not configured, skipping synthesis");
         r
     } else {
+        let call_timeout = crate::llm::orchestrator::resolve_timeout(
+            &crate::llm::orchestrator::LlmRequestType::WikiIngest,
+            is_local_config(&config),
+        );
         let sender: Arc<dyn ingest::IngestLlmSender> =
             Arc::new(ingest::OrchestratorIngestSender::new(orchestrator.inner().clone(), config));
         emit_wiki_progress(app_handle, 25, "Generating wiki pages via LLM...");
-        ingest::run_chunked_ingest(&root, batches, sender, Some(app_handle), (25, 95), cancel)
-            .await?
+        ingest::run_chunked_ingest_with_progress(
+            &root,
+            batches,
+            sender,
+            Some(app_handle),
+            (25, 95),
+            cancel,
+            ingest::IngestProgressConfig::production(call_timeout),
+        )
+        .await?
     };
+
+    if summary_skips > 0 {
+        report.warnings.push(format!(
+            "{summary_skips} full-text article(s) have no AI summary; Bango AI uses their \
+             abstracts for the wiki export."
+        ));
+    }
 
     // Finalize (FTS5 rebuild + log + clear staleness).
     emit_wiki_progress(app_handle, 95, "Indexing pages...");

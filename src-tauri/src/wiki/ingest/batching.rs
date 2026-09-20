@@ -11,13 +11,15 @@ use tauri::Emitter;
 
 use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
-use crate::models::llm_config::LlmConfig;
+use crate::models::llm_config::{LlmConfig, LlmProvider};
 use crate::wiki::frontmatter;
 use crate::wiki::raw_export;
 
 use super::authors::AuthorManifest;
 use super::consolidation::{consolidate_pages, rewrite_page_links};
-use super::{parse_llm_pages, write_page, IngestReport, ParsedPage, MAX_SOURCE_CHARS};
+use super::{
+    dedupe_pages_by_slug, parse_llm_pages, write_page, IngestReport, ParsedPage, MAX_SOURCE_CHARS,
+};
 
 /// Fraction of context window reserved for input. Remainder for output (wiki pages).
 const INPUT_BUDGET_FRACTION: f64 = 0.4;
@@ -57,6 +59,116 @@ const OUTPUT_BUDGET_SAFETY: f64 = 0.7;
 /// Continuation calls allowed per batch when a response truncates.
 pub const MAX_CONTINUATIONS_PER_BATCH: usize = 2;
 
+/// Local (Bango AI) continuation bound: CPU calls are serialized and each
+/// continuation costs minutes, so one bounded retry is enough.
+pub const LOCAL_MAX_CONTINUATIONS_PER_BATCH: usize = 1;
+
+/// Cadence of the in-flight progress ticker during LLM batch generation.
+pub const WIKI_PROGRESS_TICK_SECS: u64 = 5;
+
+/// Slow-batch warning threshold: the smaller of 5 minutes and 40% of the
+/// active per-call timeout (provider runs with a 10 min cap warn at 4 min,
+/// Bango AI with a 60 min cap warns at 5 min).
+#[must_use]
+pub fn slow_batch_threshold(call_timeout: Option<std::time::Duration>) -> std::time::Duration {
+    let five_min = std::time::Duration::from_secs(300);
+    call_timeout.map_or(five_min, |timeout| five_min.min(timeout.mul_f64(0.4)))
+}
+
+/// Ticker config for `run_chunked_ingest_with_progress`. Backend-agnostic: the
+/// ticker, ETA, and cancel poll run for provider and Bango AI runs alike; only
+/// `call_timeout` differs.
+#[derive(Debug, Clone, Copy)]
+pub struct IngestProgressConfig {
+    /// Ticker cadence (production 5 s; tests use small virtual values).
+    pub tick: std::time::Duration,
+    /// Active per-call wall-clock timeout for this backend
+    /// (`resolve_timeout(&WikiIngest, is_local)`). `None` = unknown; the
+    /// slow-batch message then omits the limit.
+    pub call_timeout: Option<std::time::Duration>,
+}
+
+impl IngestProgressConfig {
+    /// Production config for the active call timeout.
+    #[must_use]
+    pub fn production(call_timeout: std::time::Duration) -> Self {
+        Self {
+            tick: std::time::Duration::from_secs(WIKI_PROGRESS_TICK_SECS),
+            call_timeout: Some(call_timeout),
+        }
+    }
+}
+
+impl Default for IngestProgressConfig {
+    fn default() -> Self {
+        Self { tick: std::time::Duration::from_secs(WIKI_PROGRESS_TICK_SECS), call_timeout: None }
+    }
+}
+
+/// Format a duration as `M:SS` (or `H:MM:SS` past an hour).
+#[must_use]
+pub fn format_duration(duration: std::time::Duration) -> String {
+    let secs = duration.as_secs();
+    let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
+/// Format an ETA from elapsed time and completed/total batch counts.
+/// `None` before the first completion (no rate to extrapolate from) or when
+/// the run is effectively done. Hours are shown only when present.
+#[must_use]
+pub fn format_eta(elapsed: std::time::Duration, completed: usize, total: usize) -> Option<String> {
+    if completed == 0 || total == 0 || completed >= total {
+        return None;
+    }
+    let per_batch = elapsed.as_secs_f64() / completed as f64;
+    let remaining = (per_batch * (total - completed) as f64).ceil() as u64;
+    Some(format_duration(std::time::Duration::from_secs(remaining)))
+}
+
+/// Format a timeout limit as `M:SS` with hours folded into minutes, so a
+/// 60-minute local budget reads `60:00` (clearer than `1:00:00` for a limit).
+#[must_use]
+pub fn format_limit(duration: std::time::Duration) -> String {
+    let secs = duration.as_secs();
+    format!("{}:{:02}", secs / 60, secs % 60)
+}
+
+/// One ticker message (pure). The `phase_eta` flag alternates the two halves:
+/// a liveness line with the batch counter and current-batch age, and a time
+/// estimate. Past the slow threshold the liveness line names the active limit.
+#[must_use]
+pub fn progress_tick_message(
+    completed: usize,
+    total: usize,
+    since_last: std::time::Duration,
+    elapsed: std::time::Duration,
+    phase_eta: bool,
+    config: &IngestProgressConfig,
+) -> String {
+    if phase_eta {
+        return match format_eta(elapsed, completed, total) {
+            Some(eta) => format!("Estimating {eta} to go..."),
+            None => "Estimating time to go...".to_string(),
+        };
+    }
+    let batch = (completed + 1).min(total.max(1));
+    let current = format_duration(since_last);
+    let slow_suffix = if since_last >= slow_batch_threshold(config.call_timeout) {
+        match config.call_timeout {
+            Some(limit) => format!(", slow - limit {}", format_limit(limit)),
+            None => ", slow".to_string(),
+        }
+    } else {
+        String::new()
+    };
+    format!("Generating (batch {batch}/{total}, {current}{slow_suffix}) via LLM...")
+}
+
 /// Two-sided sizing (wikifix-final Change 4.4): max source articles per batch
 /// given the estimated effective output budget. `estimated_output_tokens = 0`
 /// disables the output side (input budget only, legacy behavior). Prefers the
@@ -81,6 +193,25 @@ pub fn max_articles_per_batch(n_sources: usize, estimated_output_tokens: usize) 
         }
     }
     fit
+}
+
+/// Output budget used to size wiki batches.
+///
+/// Cloud keeps the full planning estimate. Local (Bango AI) floors it to the
+/// local WikiIngest output cap so batch sizing and the wire cap agree: a 4096
+/// cap forced singleton batches (`max_articles_per_batch = floor(0.7*4096/2200)
+/// = 1`), which re-processed the shared prompt prefix once per source and
+/// blocked cross-source synthesis. The 8192 cap yields 2 sources per batch.
+#[must_use]
+pub fn wiki_batch_output_budget(config: &LlmConfig) -> usize {
+    let estimated = crate::llm::client::estimated_output_budget_tokens(config);
+    if config.provider == LlmProvider::BangoAi {
+        let cap = crate::llm::orchestrator::local_max_tokens_for(&LlmRequestType::WikiIngest)
+            .map_or(estimated, |cap| cap as usize);
+        estimated.min(cap)
+    } else {
+        estimated
+    }
 }
 
 /// Truncate `text` to at most `max_chars` at a word boundary, disclosing the
@@ -348,7 +479,10 @@ impl PromptContext {
          these sources - a batch of this size typically yields several pages. \
          Give each page as much depth as the material warrants; do not pad \
          pages or invent topics to inflate the count, and ground every page \
-         in the sources."
+         in the sources. \
+         Once you have written the pages for the distinct themes in this batch, \
+         stop immediately. Never repeat a page or re-emit a slug, and never add \
+         filler after the final page."
         )
     }
 }
@@ -482,6 +616,12 @@ pub trait IngestLlmSender: Send + Sync {
     async fn send_with_truncation(&self, prompt: &str) -> Result<(String, bool), AppError> {
         Ok((self.send(prompt).await?, false))
     }
+
+    /// Bound on continuation re-dispatches for uncovered sources. Production
+    /// lowers this on local Bango AI (serialized CPU calls, minutes each).
+    fn max_continuations(&self) -> usize {
+        MAX_CONTINUATIONS_PER_BATCH
+    }
 }
 
 /// Production sender: delegates to the shared `LlmOrchestrator`.
@@ -514,6 +654,14 @@ impl IngestLlmSender for OrchestratorIngestSender {
             .send_with_meta(&self.config, self.system_prompt, prompt, LlmRequestType::WikiIngest)
             .await?;
         Ok((response, meta.truncated_by_output_budget()))
+    }
+
+    fn max_continuations(&self) -> usize {
+        if self.config.provider == LlmProvider::BangoAi {
+            LOCAL_MAX_CONTINUATIONS_PER_BATCH
+        } else {
+            MAX_CONTINUATIONS_PER_BATCH
+        }
     }
 }
 
@@ -605,6 +753,7 @@ async fn process_batch(
     let mut pages: Vec<ParsedPage> = Vec::new();
     let mut truncated = false;
     let mut continuations = 0usize;
+    let max_continuations = sender.max_continuations();
     let uncovered: Vec<String>;
 
     loop {
@@ -626,6 +775,9 @@ async fn process_batch(
             }
         }
         pages.append(&mut parsed);
+        // Repetition guard across this response and any prior continuations:
+        // keep one page per slug (last body) before the coverage check.
+        dedupe_pages_by_slug(&mut pages);
 
         // Source-coverage guard: which batch sources are still unrepresented?
         let covered = covered_article_ids(&pages);
@@ -635,7 +787,7 @@ async fn process_batch(
             .filter(|slug| !covered.contains(slug.as_str()))
             .cloned()
             .collect();
-        if missing.is_empty() || continuations >= MAX_CONTINUATIONS_PER_BATCH {
+        if missing.is_empty() || continuations >= max_continuations {
             uncovered = missing;
             break;
         }
@@ -656,15 +808,8 @@ async fn process_batch(
     Ok(BatchOutcome { batch_index: batch.index, pages, truncated, continuations, uncovered })
 }
 
-/// Run chunked/parallel ingest. Single batch: writes immediately (LLM sees all sources,
-/// self-consistent). Multi-batch: collects all parsed pages, runs deterministic dedup
-/// + link rewrite to consolidate near-duplicates from independent batches, then writes.
-///
-/// `cancel_token` is polled between `join_next()` completions; on signal calls `abort_all`
-///
-/// (drops in-flight tasks), returns `Ok(report)` with `report.errors.push("Cancelled")`.
-///
-/// `progress_range` = `(start_pct, end_pct)` slice of the 0-100 pipeline bar.
+/// Chunked/parallel ingest with the default progress config (5 s tick, no
+/// known call timeout). See [`run_chunked_ingest_with_progress`].
 pub async fn run_chunked_ingest(
     root: &Path,
     batches: Vec<IngestBatch>,
@@ -672,6 +817,39 @@ pub async fn run_chunked_ingest(
     app_handle: Option<&tauri::AppHandle>,
     progress_range: (usize, usize),
     cancel_token: Option<&Arc<AtomicBool>>,
+) -> Result<IngestReport, AppError> {
+    run_chunked_ingest_with_progress(
+        root,
+        batches,
+        sender,
+        app_handle,
+        progress_range,
+        cancel_token,
+        IngestProgressConfig::default(),
+    )
+    .await
+}
+
+/// Run chunked/parallel ingest. Single batch: writes immediately (LLM sees all sources,
+/// self-consistent). Multi-batch: collects all parsed pages, runs deterministic dedup
+/// + link rewrite to consolidate near-duplicates from independent batches, then writes.
+///
+/// `cancel_token` is polled on every progress tick (and between
+/// `join_next()` completions); on signal calls `abort_all` (drops in-flight
+/// tasks), returns `Ok(report)` with `report.errors.push("Cancelled")`.
+///
+/// `progress_range` = `(start_pct, end_pct)` slice of the 0-100 pipeline bar.
+/// `progress` drives the alternating liveness/ETA messages and the cancel
+/// poll (production [`IngestProgressConfig::production`]; tests inject a tiny
+/// tick and drain it on paused tokio time).
+pub async fn run_chunked_ingest_with_progress(
+    root: &Path,
+    batches: Vec<IngestBatch>,
+    sender: Arc<dyn IngestLlmSender>,
+    app_handle: Option<&tauri::AppHandle>,
+    progress_range: (usize, usize),
+    cancel_token: Option<&Arc<AtomicBool>>,
+    progress: IngestProgressConfig,
 ) -> Result<IngestReport, AppError> {
     let mut report = IngestReport::default();
     if batches.is_empty() {
@@ -688,6 +866,7 @@ pub async fn run_chunked_ingest(
     crate::wiki::storage::scaffold_tree(root)?;
 
     let total_batches = batches.len();
+    let max_continuations = sender.max_continuations();
     let (start_pct, end_pct) = progress_range;
     let span = end_pct.saturating_sub(start_pct).max(1);
 
@@ -708,16 +887,67 @@ pub async fn run_chunked_ingest(
 
     /* Collect results as they complete. Single-batch: write immediately.
     Multi-batch: collect all, consolidate after all batches finish.
-    Cancel: poll token between join_next() completions. On signal, abort_all
-    drops in-flight LLM tasks, returns early. Already-completed batches'
-    pages are preserved (single-batch: on disk; multi-batch: in collected_pages
-    but NOT written - consolidation + write skipped). */
+    Cancel: polled on every progress tick and between join_next() completions.
+    On signal, abort_all drops in-flight LLM tasks, returns early.
+    Already-completed batches' pages are preserved (single-batch: on disk;
+    multi-batch: in collected_pages but NOT written - consolidation + write
+    skipped). */
     let mut collected_pages: Vec<ParsedPage> = Vec::new();
     // (type, body-chars) telemetry for single-batch runs; multi-batch derives
     // it from `collected_pages` after consolidation.
     let mut page_meta: Vec<(String, usize)> = Vec::new();
     let mut completed = 0usize;
-    while let Some(res) = join_set.join_next().await {
+    let started = std::time::Instant::now();
+    // Age of the current in-flight work: reset on every completion; before the
+    // first completion it equals total elapsed time.
+    let mut last_completion = started;
+    let mut ticker = tokio::time::interval(progress.tick);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut eta_phase = false;
+    loop {
+        let res = tokio::select! {
+            biased;
+            maybe = join_set.join_next() => match maybe {
+                Some(res) => res,
+                None => break,
+            },
+            _ = ticker.tick() => {
+                /* Cancellation must not wait for a batch boundary: a local
+                batch can generate for the full request budget, so the tick
+                doubles as the cancel poll and aborts the in-flight request.
+                The two messages alternate every tick so the user sees liveness
+                plus a time estimate; the liveness half gains a `slow` suffix
+                once the current call passes the active timeout threshold. */
+                if cancel_token.is_some_and(|t| t.load(Ordering::SeqCst)) {
+                    join_set.abort_all();
+                    eprintln!("[wiki:diag] cancel detected during LLM batch; aborting remaining tasks");
+                    report.errors.push("Cancelled".to_string());
+                    while join_set.join_next().await.is_some() {}
+                    return Ok(report);
+                }
+                if let Some(handle) = app_handle {
+                    let pct = (start_pct + (completed * span) / total_batches.max(1)).min(end_pct);
+                    let message = progress_tick_message(
+                        completed,
+                        total_batches,
+                        last_completion.elapsed(),
+                        started.elapsed(),
+                        eta_phase,
+                        &progress,
+                    );
+                    eta_phase = !eta_phase;
+                    let _ = handle.emit(
+                        "wiki:progress",
+                        crate::commands::wiki_cmd::WikiProgress {
+                            step: pct,
+                            total_steps: crate::commands::wiki_cmd::WIKI_PIPELINE_TOTAL_STEPS,
+                            message,
+                        },
+                    );
+                }
+                continue;
+            }
+        };
         // Check for cancel between completions. When signalled, abort all
         // remaining tasks and return early.
         if cancel_token.is_some_and(|t| t.load(Ordering::SeqCst)) {
@@ -729,6 +959,7 @@ pub async fn run_chunked_ingest(
             return Ok(report);
         }
         completed += 1;
+        last_completion = std::time::Instant::now();
         match res {
             Ok(Ok(outcome)) => {
                 let batch_index = outcome.batch_index;
@@ -741,7 +972,7 @@ pub async fn run_chunked_ingest(
                     report.uncovered_sources.extend(outcome.uncovered.iter().cloned());
                     report.errors.push(format!(
                         "Batch {}: {} source(s) not covered by any page after \
-                         {MAX_CONTINUATIONS_PER_BATCH} continuations: {}",
+                         {max_continuations} continuations: {}",
                         batch_index + 1,
                         outcome.uncovered.len(),
                         outcome.uncovered.join(", ")
