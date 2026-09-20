@@ -227,8 +227,8 @@ command rejection is suppressed), set-up pitch with
 download/disk/memory lines and warning reasons, unsupported blocked state
 with no cloud-fallback wording, Test Bango AI timings, Advanced
 context/threads/reasoning, Verify Installation + two-step Remove with the
-same verified/delete icons as the Embeddings card, collapsed Component
-Details), `settings-embeddings.vue` (the Embeddings card, mounted directly under the
+same verified/delete icons as the Embeddings card, Component
+Details via the shared expandable block), `settings-embeddings.vue` (the Embeddings card, mounted directly under the
 provider card: "Embedding Provider" radio - Configured Provider vs Bango
 Local - where selecting Bango Local before a healthy install opens
 `embeddings-consent-dialog.vue` first (what runs locally, download size from
@@ -262,7 +262,10 @@ the cascade phase; backend contract in
 `src-tauri/src/commands/AGENTS.md`),
 `settings-project-management.vue`,
 `settings-notification-history.vue`, `settings-diagnostics.vue`. Shared card
-chrome lives in `settings-card-shared.css`.
+chrome lives in `settings-card-shared.css`, including the expandable
+`.settings-card__details-toggle` / `__details-grid` / `__details-fallback`
+Component Details block used by both the Embeddings and Bango AI cards
+(identical visuals; keep them on the shared classes).
 
 - Settings backend radios (`settings-ai-section.vue`,
   `settings-embeddings.vue`) drive `:checked` from an explicit `selected`

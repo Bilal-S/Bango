@@ -51,14 +51,14 @@ onMounted(() => {
       </p>
     </div>
 
-    <!-- Consolidated AI Provider box (warning + connection + params + actions + feedback) -->
-    <SettingsAiSection />
-
-    <!-- Embedding backend (Configured Provider vs on-device Bango Local) -->
-    <SettingsEmbeddings />
-
-    <!-- Non-LLM settings cards -->
+    <!-- All settings cards share one 1rem vertical rhythm (LLM + app cards). -->
     <div class="settings-view__cards">
+      <!-- Consolidated AI Provider box (warning + connection + params + actions + feedback) -->
+      <SettingsAiSection />
+
+      <!-- Embedding backend (Configured Provider vs on-device Bango Local) -->
+      <SettingsEmbeddings />
+
       <SettingsAiSummaries />
       <SettingsScreeningPreferences />
       <SettingsStorage />
@@ -110,7 +110,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  margin-top: 2rem;
+  margin-top: 1.5rem;
 }
 
 /* Scroll target for the Dashboard's "Start New Project" deep-link

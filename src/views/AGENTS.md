@@ -37,6 +37,15 @@ Help, the Bibliometrics suite, and Diagnostics.
 
 ## Local Contracts
 
+### Settings layout (`settings-view.vue`)
+
+All settings cards (AI provider/Bango AI panel, Embeddings, and every app
+card) live in the single `.settings-view__cards` flex column, so they share
+one uniform 1rem vertical gap; the header gap is 1.5rem. New settings cards
+must be added to that column. Every card surface (including the Bango AI
+`.bango-card`) uses the white `surface-container-lowest` surface with the
+surface-variant border and the standard card shadow - no transparent panels.
+
 ### Keep-alive caching
 
 `article-list.vue` (`/articles`) and `wiki-view.vue` (`/wiki`) are

@@ -141,7 +141,13 @@ describe('settings-bango-ai-card', () => {
     const wrapper = mount(SettingsBangoAiCard);
     await flushPromises();
     const toggle = wrapper.findAll('button').find((b) => b.text().includes('Component Details'));
+    // Same expandable pattern as the Embeddings card: caret icon + label,
+    // shared `.settings-card__details-*` chrome.
+    expect(toggle!.find('.material-symbols-outlined').text()).toBe('expand_more');
     await toggle!.trigger('click');
+    expect(toggle!.find('.material-symbols-outlined').text()).toBe('expand_less');
+    expect(wrapper.find('.settings-card__details-grid').exists()).toBe(true);
+    expect(wrapper.find('.settings-card__details-fallback').exists()).toBe(true);
     expect(wrapper.text()).toContain('/docs/Bango/model');
     expect(wrapper.text()).toContain('OneDrive detected');
   });

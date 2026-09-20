@@ -263,10 +263,13 @@ onMounted(async () => {
           </label>
         </details>
 
-        <button class="bango-card__details-toggle" @click="showDetails = !showDetails">
-          {{ showDetails ? 'Hide' : 'Show' }} Component Details
+        <button class="settings-card__details-toggle" @click="showDetails = !showDetails">
+          <span class="material-symbols-outlined">{{
+            showDetails ? 'expand_less' : 'expand_more'
+          }}</span>
+          Component Details
         </button>
-        <dl v-if="showDetails" class="bango-card__details">
+        <dl v-if="showDetails" class="settings-card__details-grid">
           <dt>Model</dt>
           <dd>{{ status?.model }} ({{ status?.profile }})</dd>
           <dt>Engine</dt>
@@ -274,15 +277,16 @@ onMounted(async () => {
           <dt>Installed size</dt>
           <dd>{{ ((status?.installedBytes ?? 0) / (1024 * 1024 * 1024)).toFixed(1) }} GB</dd>
           <dt>Model path</dt>
-          <dd class="is-path">{{ status?.modelRoot }}</dd>
+          <dd>{{ status?.modelRoot }}</dd>
           <dt>Runtime path</dt>
-          <dd class="is-path">{{ status?.runtimeRoot }}</dd>
+          <dd>{{ status?.runtimeRoot }}</dd>
           <dt>Log</dt>
-          <dd class="is-path">{{ status?.logPath }}</dd>
-          <p v-if="status?.usedFallback" class="bango-card__hint">
-            OneDrive detected: models live in app data instead.
-          </p>
+          <dd>{{ status?.logPath }}</dd>
         </dl>
+        <p v-if="showDetails && status?.usedFallback" class="settings-card__details-fallback">
+          <span class="material-symbols-outlined">info</span>
+          OneDrive detected: models live in app data instead.
+        </p>
       </template>
     </template>
 
@@ -295,10 +299,14 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+@import './settings-card-shared.css';
+
 .bango-card {
-  border: 1px solid var(--color-outline-variant, #d7d7e0);
-  border-radius: 0.75rem;
-  padding: 1rem;
+  background-color: var(--color-surface-container-lowest, #ffffff);
+  border: 1px solid var(--color-surface-variant, #e4e1ee);
+  border-radius: var(--radius-xl, 0.75rem);
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -371,28 +379,6 @@ onMounted(async () => {
 }
 .bango-card__field--check {
   justify-content: flex-start;
-}
-.bango-card__details-toggle {
-  align-self: flex-start;
-  background: none;
-  border: none;
-  color: var(--color-primary, #4f46e5);
-  cursor: pointer;
-  padding: 0;
-}
-.bango-card__details {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.25rem 1rem;
-  font-size: 0.85rem;
-  margin: 0;
-}
-.bango-card__details dt {
-  font-weight: 600;
-}
-.bango-card__details dd {
-  margin: 0;
-  word-break: break-all;
 }
 .bango-card__hint {
   font-size: 0.8rem;

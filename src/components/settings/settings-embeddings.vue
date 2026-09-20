@@ -380,42 +380,40 @@ async function onRemove(): Promise<void> {
       </div>
 
       <!-- Component Details -->
-      <div class="emb-details">
-        <button class="emb-details__toggle" @click="detailsOpen = !detailsOpen">
-          <span class="material-symbols-outlined">{{
-            detailsOpen ? 'expand_less' : 'expand_more'
-          }}</span>
-          Component Details
-        </button>
-        <dl v-if="detailsOpen" class="emb-details__grid">
-          <dt>Profile</dt>
-          <dd>
-            <code>{{ status.profile }}</code>
-          </dd>
-          <dt>Model</dt>
-          <dd>{{ status.model }} (768 dimensions)</dd>
-          <dt>Engine</dt>
-          <dd>
-            ONNX Runtime {{ status.runtimeVersion ?? '-' }} (CPU, up to
-            {{ status.threadBudget }} threads)
-          </dd>
-          <dt>Installed size</dt>
-          <dd>{{ formatMb(status.installedBytes) }}</dd>
-          <dt>Model files</dt>
-          <dd>
-            <code>{{ status.modelRoot }}</code>
-          </dd>
-          <dt>Runtime</dt>
-          <dd>
-            <code>{{ status.runtimeRoot }}</code>
-          </dd>
-        </dl>
-        <p v-if="detailsOpen && status.usedFallback" class="emb-details__fallback">
-          <span class="material-symbols-outlined">info</span>
-          Your documents folder is managed by OneDrive, so the model files are stored in the local
-          app-data folder instead (Bango never uploads them).
-        </p>
-      </div>
+      <button class="settings-card__details-toggle" @click="detailsOpen = !detailsOpen">
+        <span class="material-symbols-outlined">{{
+          detailsOpen ? 'expand_less' : 'expand_more'
+        }}</span>
+        Component Details
+      </button>
+      <dl v-if="detailsOpen" class="settings-card__details-grid">
+        <dt>Profile</dt>
+        <dd>
+          <code>{{ status.profile }}</code>
+        </dd>
+        <dt>Model</dt>
+        <dd>{{ status.model }} (768 dimensions)</dd>
+        <dt>Engine</dt>
+        <dd>
+          ONNX Runtime {{ status.runtimeVersion ?? '-' }} (CPU, up to
+          {{ status.threadBudget }} threads)
+        </dd>
+        <dt>Installed size</dt>
+        <dd>{{ formatMb(status.installedBytes) }}</dd>
+        <dt>Model files</dt>
+        <dd>
+          <code>{{ status.modelRoot }}</code>
+        </dd>
+        <dt>Runtime</dt>
+        <dd>
+          <code>{{ status.runtimeRoot }}</code>
+        </dd>
+      </dl>
+      <p v-if="detailsOpen && status.usedFallback" class="settings-card__details-fallback">
+        <span class="material-symbols-outlined">info</span>
+        Your documents folder is managed by OneDrive, so the model files are stored in the local
+        app-data folder instead (Bango never uploads them).
+      </p>
     </div>
 
     <!-- Consent dialog (first Bango Local download) -->
@@ -618,60 +616,5 @@ async function onRemove(): Promise<void> {
   align-items: center;
   gap: 0.375rem;
   margin: 0;
-}
-
-.emb-details__toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  background: none;
-  border: none;
-  padding: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-primary, #3525cd);
-  cursor: pointer;
-}
-
-.emb-details__grid {
-  display: grid;
-  grid-template-columns: minmax(110px, auto) 1fr;
-  gap: 0.375rem 0.75rem;
-  font-size: 12.5px;
-  margin: 0.5rem 0 0;
-  padding: 0.625rem 0.875rem;
-  background-color: var(--color-surface-container-low, #f5f2ff);
-  border: 1px solid var(--color-surface-variant, #e4e1ee);
-  border-radius: 0.5rem;
-}
-
-.emb-details__grid dt {
-  color: var(--color-on-surface-variant, #464555);
-  font-weight: 600;
-}
-
-.emb-details__grid dd {
-  margin: 0;
-  color: var(--color-on-surface, #1b1b24);
-  word-break: break-all;
-}
-
-.emb-details__grid code {
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
-  font-size: 11.5px;
-}
-
-.emb-details__fallback {
-  display: flex;
-  gap: 0.375rem;
-  align-items: center;
-  font-size: 12px;
-  color: var(--color-on-surface-variant, #464555);
-  margin: 0.5rem 0 0;
-}
-
-.emb-details__fallback .material-symbols-outlined {
-  font-size: 16px;
-  flex-shrink: 0;
 }
 </style>
