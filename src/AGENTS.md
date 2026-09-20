@@ -160,7 +160,9 @@ directories are indexed inline.
   DOI-direct gate; drives the OpenAlex search hint),
   `cluster-members.ts` (pure `collectClusterMembers` for cluster thematic
   analysis; collects visible members only, skipping `hidden` nodes whose
-  cluster ids can go stale after a recalculate).
+  cluster ids can go stale after a recalculate),
+  `settings-sections.ts` (ordered Settings card sections + rail labels and
+  the `?focus=` deep-link resolver driving `settings-view.vue`).
 - **`types/`** - TypeScript interfaces (incl. `openalex.ts`, `wiki.ts`,
   `zotero.ts` (local API payload types mirrored from the Rust serde
   structs), `index.ts`).

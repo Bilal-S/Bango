@@ -230,7 +230,7 @@ async function onRemove(): Promise<void> {
 </script>
 
 <template>
-  <section id="settings-embeddings" class="settings-card">
+  <section class="settings-card">
     <h2 class="settings-card__title">
       <span class="material-symbols-outlined text-primary">psychology</span>
       Embeddings

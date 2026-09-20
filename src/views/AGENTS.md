@@ -39,12 +39,37 @@ Help, the Bibliometrics suite, and Diagnostics.
 
 ### Settings layout (`settings-view.vue`)
 
-All settings cards (AI provider/Bango AI panel, Embeddings, and every app
-card) live in the single `.settings-view__cards` flex column, so they share
-one uniform 1rem vertical gap; the header gap is 1.5rem. New settings cards
-must be added to that column. Every card surface (including the Bango AI
-`.bango-card`) uses the white `surface-container-lowest` surface with the
-surface-variant border and the standard card shadow - no transparent panels.
+All settings cards live in the single `.settings-view__cards` flex column, so
+they share one uniform 1rem vertical gap; the header gap is 1.5rem. New
+settings cards must be added to that column and registered in
+`SETTINGS_SECTIONS` (`src/utils/settings-sections.ts`). Every card surface
+(including the Bango AI `.bango-card`) uses the white
+`surface-container-lowest` surface with the surface-variant border and the
+standard card shadow - no transparent panels.
+
+Canonical order and one-word rail labels: AI (`settings-ai`) → Embeddings
+(`settings-embeddings`) → Project (`settings-project-management`) →
+Summaries (`settings-summaries`) → Screening (`settings-screening`) → Search
+(`settings-search`) → Storage (`settings-storage`) → Batch
+(`settings-batch`) → History (`settings-history`) → Diagnostics
+(`settings-diagnostics`). Card ids are assigned in `settings-view.vue` via
+attribute fallthrough, never hard-coded in the card components, and are the
+single anchor namespace for the rail and deep links.
+
+- The rail (`.settings-view__nav`) renders `SETTINGS_SECTIONS` as buttons: a
+  sticky right rail at ≥1024px and a sticky horizontal chip row below that.
+  Clicking smooth-scrolls (`scrollIntoView`), marks the entry active, and
+  writes `?focus=<id>` via `router.replace`.
+- Scroll-spy listens on `.app-shell__content` (window fallback) and picks
+  the last card at/above the 120px trigger; a 1s manual guard suppresses it
+  during programmatic jumps.
+- Deep links `/settings?focus=<id>` (legacy `?focus=project-management`
+  included) scroll on mount. Because AI/Embeddings status loads resize cards
+  above the target after the first scroll, the deep link re-aligns through a
+  `ResizeObserver` on the cards column until it settles, the user takes over
+  (wheel/touch), or 2s elapse.
+- Jump targets carry `scroll-margin-top` (1rem desktop, 4rem under the
+  mobile chip row).
 
 ### Keep-alive caching
 
