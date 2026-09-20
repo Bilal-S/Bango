@@ -89,7 +89,7 @@ const memoryLine = computed(() => {
   const hw = status.value?.hardware;
   if (!hw) return '';
   const gb = Math.round(hw.totalRamMb / 1024);
-  return `Memory: ${gb} GB detected${hw.totalRamMb >= 24 * 1024 ? ' - Recommended' : ''}`;
+  return `Memory: ${gb} GB detected${hw.totalRamMb >= 16 * 1024 ? ' - Recommended' : ''}`;
 });
 
 const warningReasons = computed(() =>

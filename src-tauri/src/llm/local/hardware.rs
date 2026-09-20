@@ -7,12 +7,15 @@ use serde::Serialize;
 use crate::local_ai::download::available_bytes;
 use crate::local_ai::manifest::current_target;
 
-/// Total RAM below this is a warning (not a hard gate): the 9B Q4 model can
-/// still run, but slowly or under memory pressure.
-pub const MIN_RAM_MB: u64 = 16 * 1024;
+/// Total RAM below this is a warning (not a hard gate): the pinned 2B model
+/// needs a ~3 GB working set (weights + KV cache + compute buffers), so an
+/// 8 GB machine still runs it, but slowly or under memory pressure.
+pub const MIN_RAM_MB: u64 = 8 * 1024;
 
-/// Available RAM below this is a warning alongside the total-RAM floor.
-pub const LOW_AVAILABLE_RAM_MB: u64 = 8 * 1024;
+/// Available RAM below this is a warning alongside the total-RAM floor (the
+/// working set must stay resident; llama.cpp mmaps weights, so a shortfall
+/// degrades to page-fault thrashing before it fails).
+pub const LOW_AVAILABLE_RAM_MB: u64 = 4 * 1024;
 
 /// A point-in-time hardware profile for the Bango AI panel and verdict.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -57,7 +60,7 @@ impl HardwareVerdict {
 
 /// Assess a hardware profile against the disk the install requires.
 /// Unsupported = unsupported target or insufficient free disk; warning =
-/// total RAM below 16 GB, little available RAM, or missing AVX2 on x86.
+/// total RAM below 8 GB, little available RAM, or missing AVX2 on x86.
 #[must_use]
 pub fn assess(profile: &HardwareProfile, required_disk_mb: u64) -> HardwareVerdict {
     let mut unsupported = Vec::new();
@@ -81,7 +84,7 @@ pub fn assess(profile: &HardwareProfile, required_disk_mb: u64) -> HardwareVerdi
     let mut warnings = Vec::new();
     if profile.total_ram_mb < MIN_RAM_MB {
         warnings.push(format!(
-            "This computer has {} GB of memory. Bango AI needs about 8 GB for the model and \
+            "This computer has {} GB of memory. Bango AI needs about 3 GB of memory and \
              will be slow or may fail.",
             profile.total_ram_mb / 1024
         ));
@@ -153,8 +156,8 @@ mod tests {
     #[test]
     fn verdict_warns_below_ram_floor_and_without_avx2() {
         let mut profile = base_profile();
-        profile.total_ram_mb = 8 * 1024;
-        profile.available_ram_mb = 4 * 1024;
+        profile.total_ram_mb = 6 * 1024;
+        profile.available_ram_mb = 3 * 1024;
         profile.avx2 = Some(false);
         let verdict = assess(&profile, 12 * 1024);
         let HardwareVerdict::Warning { reasons } = &verdict else {

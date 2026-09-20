@@ -31,6 +31,18 @@ watch([() => backend.value, () => installing.value], ([next, isInstalling]) => {
   selected.value = isInstalling ? 'bango_ai' : next;
 });
 
+/**
+ * Non-blocking hardware notice inside the Bango AI toggle: informs on limited
+ * resources (verdict warning) or an unsupported machine before the user
+ * clicks. Purely informational - installability and details live in the card.
+ */
+const hardwareNotice = computed(() => {
+  const verdict = status.value?.verdict?.status;
+  if (verdict === 'unsupported') return 'Not available on this machine.';
+  if (verdict === 'warning') return 'Limited hardware detected - may be slow.';
+  return '';
+});
+
 const consentModel = computed(() => status.value?.model ?? 'Qwen3.5 2B');
 const consentBytes = computed(() => status.value?.downloadBytes ?? 0);
 const consentLicense = computed(() => status.value?.license ?? 'MIT');
@@ -111,7 +123,8 @@ function onConsentCancel(): void {
         />
         <span>
           <strong>Bango AI</strong>
-          <small>Runs on this computer. No API key or usage charges.</small>
+          <small>Runs locally and can be slow. <strong>no API key or usage charges</strong>.</small>
+          <small v-if="hardwareNotice" class="ai-section__hardware">{{ hardwareNotice }}</small>
         </span>
       </label>
     </div>
@@ -189,5 +202,9 @@ function onConsentCancel(): void {
 }
 .ai-section__option small {
   color: var(--color-on-surface-variant, #464555);
+}
+.ai-section__hardware {
+  color: #b45309;
+  font-weight: 600;
 }
 </style>

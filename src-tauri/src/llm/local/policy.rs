@@ -7,11 +7,12 @@
 pub const ALLOWED_CONTEXTS: [i32; 4] = [8_192, 16_384, 32_768, 65_536];
 
 /// At or above this much total RAM the default context is 32k.
-pub const LARGE_RAM_THRESHOLD_MB: u64 = 24 * 1024;
+pub const LARGE_RAM_THRESHOLD_MB: u64 = 16 * 1024;
 
 /// At or above this much total RAM the default context is 64k (the model
-/// trains to 256k; the 64k KV cache is roughly 10 GB for this 9B).
-pub const XLARGE_RAM_THRESHOLD_MB: u64 = 48 * 1024;
+/// trains to 256k; the hybrid-attention 2B carries only 6 full-attention
+/// layers with 2 KV heads, so even the 64k KV cache stays under 1 GB).
+pub const XLARGE_RAM_THRESHOLD_MB: u64 = 32 * 1024;
 
 /// Maximum generation threads. The small pinned model is memory-bandwidth
 /// bound, so more threads keep helping up to 12; the UI/SQLite reserve is
@@ -47,7 +48,8 @@ pub fn recommend_settings(total_ram_mb: u64, cores: usize) -> EngineSettings {
     }
 }
 
-/// Default context for a machine: 32k on 24 GB+ machines, 16k below.
+/// Default context for a machine: 16k below 16 GB, 32k at 16 GB+, 64k at
+/// 32 GB+.
 #[must_use]
 pub fn context_default_for_ram(total_ram_mb: u64) -> i32 {
     if total_ram_mb >= XLARGE_RAM_THRESHOLD_MB {
@@ -69,7 +71,8 @@ pub fn clamp_context(value: i32) -> i32 {
         .unwrap_or(16_384)
 }
 
-/// Generation thread budget: `cores - 2`, floor 1, ceiling 8.
+/// Generation thread budget: `cores - 2`, floor 1, ceiling `MAX_LLM_THREADS`
+/// (12).
 #[must_use]
 pub fn llm_thread_budget(cores: usize) -> usize {
     cores.saturating_sub(RESERVED_CORES).clamp(1, MAX_LLM_THREADS)
@@ -82,8 +85,9 @@ mod tests {
     #[test]
     fn context_default_follows_total_ram() {
         assert_eq!(context_default_for_ram(8 * 1024), 16_384);
-        assert_eq!(context_default_for_ram(16 * 1024), 16_384);
+        assert_eq!(context_default_for_ram(16 * 1024), 32_768);
         assert_eq!(context_default_for_ram(24 * 1024), 32_768);
+        assert_eq!(context_default_for_ram(32 * 1024), 65_536);
         assert_eq!(context_default_for_ram(48 * 1024), 65_536);
         assert_eq!(context_default_for_ram(64 * 1024), 65_536);
         // Stored values clamp to the nearest selectable size.

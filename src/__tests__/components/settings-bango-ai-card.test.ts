@@ -112,11 +112,11 @@ describe('settings-bango-ai-card', () => {
     refOf<BangoAiStatus | null>('status').value = status({
       verdict: {
         status: 'warning',
-        reasons: ['This computer has 8 GB of memory. Bango AI needs about 8 GB for the model.'],
+        reasons: ['This computer has 6 GB of memory. Bango AI needs about 3 GB of memory.'],
       },
     });
     const wrapper = mount(SettingsBangoAiCard);
-    expect(wrapper.text()).toContain('8 GB of memory');
+    expect(wrapper.text()).toContain('6 GB of memory');
     expect(wrapper.text()).toContain('Set Up Bango AI');
     expect(wrapper.text()).toContain('generally slower than cloud providers');
   });

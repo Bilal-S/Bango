@@ -296,9 +296,10 @@ OpenAI-compatible). Routing an OpenAI-shaped body to
   (`builtin/qwen3.5-2b-ud-q4kxl@r1`), the model file name, the runtime
   directory (`llama.cpp`), the engine label, and the platform server binary
   name.
-- `local/policy.rs` owns the RAM-aware context default (16k below 24 GB, 32k
-  at or above), context clamping to 8k/16k/32k/64k, and the generation thread
-  budget (`cores - 2`, floor 1, ceiling 12).
+- `local/policy.rs` owns the RAM-aware context default (16k below 16 GB, 32k
+  at 16 GB+, 64k at 32 GB+; calibrated for the pinned hybrid-attention 2B
+  whose 64k KV cache stays under 1 GB), context clamping to 8k/16k/32k/64k,
+  and the generation thread budget (`cores - 2`, floor 1, ceiling 12).
 - `local/hardware.rs` owns `HardwareProfile` / `HardwareVerdict` / `assess`
   (unsupported = target or disk; warning = RAM floors or missing AVX2) plus
   the `sysinfo`-backed `detect()`.

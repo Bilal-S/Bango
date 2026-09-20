@@ -61,6 +61,25 @@ describe('settings-backend-selection', () => {
     expect(mocked.selectBackend).toHaveBeenCalledWith('configured_provider');
   });
 
+  it('toggle_shows_limited_hardware_notice_on_warning_verdict', async () => {
+    (mocked.state.status as Ref<unknown>).value = {
+      state: 'not_installed',
+      supportedTarget: true,
+      verdict: { status: 'warning', reasons: ['This computer has 6 GB of memory.'] },
+    };
+    const wrapper = mount(SettingsAiSection);
+    await flushPromises();
+    expect(wrapper.text()).toContain('Limited hardware detected');
+    // Informational only: the radio stays clickable, nothing is blocked.
+    expect(wrapper.find('input[value="bango_ai"]').attributes('disabled')).toBeUndefined();
+  });
+
+  it('toggle_hardware_notice_absent_on_supported_or_missing_verdict', async () => {
+    const wrapper = mount(SettingsAiSection);
+    await flushPromises();
+    expect(wrapper.find('.ai-section__hardware').exists()).toBe(false);
+  });
+
   it('provider_selection_persists_configured_provider', async () => {
     backendRef().value = 'bango_ai';
     const wrapper = mount(SettingsAiSection);
