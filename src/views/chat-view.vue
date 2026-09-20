@@ -205,6 +205,37 @@ async function handleSend() {
   scrollToBottom();
 }
 
+/* ── Welcome-card hint actions ──────────────────────────────────────────────
+ * The empty-transcript welcome cards' hint lines are clickable; each emits
+ * and the view performs the action the hint describes. The mode hints only
+ * ever ENTER their mode (never toggle off), matching their "to start"
+ * wording. */
+
+/** Article card hint: open the article picker (mirrors the (+) button). */
+function onWelcomeOpenArticlePicker(): void {
+  showSelector.value = true;
+}
+
+/** Wiki card hint (wiki ready): switch chat into wiki mode. */
+function onWelcomeToggleWiki(): void {
+  if (chatStore.source !== 'wiki') onToggleWiki();
+}
+
+/** Wiki card hint (wiki not ready): jump to the Wiki screen to initialize it. */
+function onWelcomeOpenWikiScreen(): void {
+  router.push('/wiki');
+}
+
+/** Citation card hint: switch chat into Citation Finder mode. */
+function onWelcomeActivateCitation(): void {
+  if (!isCitationMode.value) onToggleCitationFinder();
+}
+
+/** Citation card hint (provider-blocked): jump to Settings. */
+function onWelcomeOpenSettings(): void {
+  router.push('/settings');
+}
+
 onMounted(async () => {
   /* LLM-configured gate is reactive (no IPC probe needed). Kick off wiki
    * status + citation readiness loads so toggle visibility is correct. */
@@ -281,11 +312,18 @@ onUnmounted(() => {
           ref="chatScrollContainer"
           class="flex-1 overflow-y-auto p-container-padding space-y-4 flex flex-col"
         >
-          <!-- Welcome state: three-column overview of the three chat modes -->
+          <!-- Welcome state: three-column overview of the three chat modes.
+               The hint lines are clickable shortcuts into each mode; the
+               events are routed by the handlers below. -->
           <ChatWelcomeCards
             v-if="chatStore.messages.length === 0"
             :wiki-ready="chatStore.wikiReady"
             :citation-toggle-state="citationToggleState"
+            @open-article-picker="onWelcomeOpenArticlePicker"
+            @toggle-wiki="onWelcomeToggleWiki"
+            @open-wiki-screen="onWelcomeOpenWikiScreen"
+            @activate-citation="onWelcomeActivateCitation"
+            @open-settings="onWelcomeOpenSettings"
           />
 
           <!-- Transcript: message bubbles + citation stacks + thinking dots.

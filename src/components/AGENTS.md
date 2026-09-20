@@ -269,7 +269,10 @@ chrome lives in `settings-card-shared.css`.
   the inline error. State via `useLocalEmbeddings()` in chat-view.
 - Chat-view feature components (props-down/events-up, no store access):
   `chat-welcome-cards.vue` (empty-transcript three-mode overview; the
-  Citation Finder hint branches on the toggle state),
+  Citation Finder hint branches on the toggle state; every hint line is a
+  clickable button emitting its action - openArticlePicker / toggleWiki /
+  openWikiScreen / activateCitation / openSettings - which chat-view routes
+  to the picker, the mode toggles, or /wiki + /settings),
   `chat-message-list.vue` (bubbles + citation stacks + thinking dots; owns
   claim collapse, IEEE flattening, markdown/wiki rendering, bubble-click
   routing; the `data-msg-idx` attributes feed the transcript scroll anchor),

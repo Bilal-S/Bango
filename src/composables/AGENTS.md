@@ -84,8 +84,11 @@ views, LLM config, wiki, dashboard, saved reports, and the startup upgrade.
   drift check, wiki-mode toggle, reader nav stack),
   `use-chat-article-context.ts` (candidate article list + context-set
   toggling + selector open state),
-  `use-chat-transcript.ts` (scroll-to-bottom + the citation result-arrival
-  anchor; the view owns and binds the container ref),
+  `use-chat-transcript.ts` (scroll-to-bottom, the submit-time user-bubble
+  anchor - every send pins the just-pushed user bubble to the top of the
+  scroll area so it stays visible while the response streams in - and the
+  citation result-arrival anchor; the view owns and binds the container
+  ref),
   and `use-demo.ts` (loads `assets/demo-project.bango.json`).
 
 ## Local Contracts

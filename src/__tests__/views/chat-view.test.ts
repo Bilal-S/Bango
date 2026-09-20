@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, flushPromises, enableAutoUnmount, type VueWrapper } from '@vue/test-utils';
 import { ref } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
-import { createRouter, createMemoryHistory } from 'vue-router';
+import { createRouter, createMemoryHistory, type Router } from 'vue-router';
 import { makeArticle } from '../helpers/fixtures';
 import type {
   CitationFinderProgress,
@@ -281,13 +281,22 @@ import { tauriCommand } from '@/composables/use-tauri-command';
 
 const mockTauriCommand = vi.mocked(tauriCommand);
 
+/** The router created by the latest `mountChatView` (assert navigation side
+ * effects of in-view actions, e.g. the welcome-card hint shortcuts). */
+let testRouter: Router | null = null;
+
 function mountChatView(): VueWrapper {
   const pinia = createPinia();
   setActivePinia(pinia);
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/', component: { template: '<div />' } }],
+    routes: [
+      { path: '/', component: { template: '<div />' } },
+      { path: '/wiki', component: { template: '<div />' } },
+      { path: '/settings', component: { template: '<div />' } },
+    ],
   });
+  testRouter = router;
   return mount(ChatView, {
     global: {
       plugins: [pinia, router],
@@ -389,6 +398,58 @@ describe('chat-view.vue - article context selector', () => {
   });
 });
 
+describe('chat-view.vue - welcome card hint actions', () => {
+  beforeEach(() => {
+    resetMockState();
+  });
+
+  it('opens the article selector from the article card hint', async () => {
+    mockArticles.value = [makeArticle({ id: 'a1', title: 'Alpha Study' })];
+    const wrapper = await mountAndSettle();
+    await wrapper.findAll('button.chat-welcome-card__hint')[0]!.trigger('click');
+    await flushPromises();
+    /* The selector modal is teleported to document.body; its checkbox list
+     * only exists while the picker is open. */
+    expect(document.body.querySelectorAll('input[type="checkbox"]').length).toBe(1);
+  });
+
+  it('enters wiki mode from the wiki card hint', async () => {
+    const wrapper = await mountAndSettle();
+    await wrapper.findAll('button.chat-welcome-card__hint')[1]!.trigger('click');
+    await flushPromises();
+    const store = useChatStore();
+    expect(store.source).toBe('wiki');
+    expect(wrapper.find('input[type="text"]').attributes('placeholder')).toBe(
+      'Ask a question about your wiki...'
+    );
+  });
+
+  it('routes to the Wiki screen from the hint when the wiki is not initialized', async () => {
+    mockWikiStatus.value = makeWikiStatus({ initialized: false, pageCount: 0 });
+    const wrapper = await mountAndSettle();
+    await wrapper.findAll('button.chat-welcome-card__hint')[1]!.trigger('click');
+    await flushPromises();
+    expect(testRouter!.currentRoute.value.path).toBe('/wiki');
+  });
+
+  it('switches to citation-finder mode from the citation card hint', async () => {
+    const wrapper = await mountAndSettle();
+    await wrapper.findAll('button.chat-welcome-card__hint')[2]!.trigger('click');
+    await flushPromises();
+    const store = useChatStore();
+    expect(store.source).toBe('citation-finder');
+    expect(wrapper.find('.citation-input-area').exists()).toBe(true);
+  });
+
+  it('routes to Settings from the citation card hint on a disabled provider', async () => {
+    mockReadiness.value = makeReadiness({ embeddingStatus: 'disabled' });
+    const wrapper = await mountAndSettle();
+    await wrapper.findAll('button.chat-welcome-card__hint')[2]!.trigger('click');
+    await flushPromises();
+    expect(testRouter!.currentRoute.value.path).toBe('/settings');
+  });
+});
+
 describe('chat-view.vue - article + wiki chat send', () => {
   beforeEach(() => {
     resetMockState();
@@ -407,6 +468,20 @@ describe('chat-view.vue - article + wiki chat send', () => {
     });
     expect(wrapper.text()).toContain('What does the evidence say?');
     expect(wrapper.text()).toContain('Assistant answer.');
+  });
+
+  it('pins the user bubble to the top of the scroll area on submit', async () => {
+    const wrapper = await mountAndSettle();
+    const input = wrapper.find('input[type="text"]');
+    await input.setValue('Show my bubble');
+    await input.trigger('keydown.enter');
+    await flushPromises();
+    /* The submit-time anchor pins the just-pushed user bubble (the same
+     * scrollAnchorToContainerTop call the citation result-arrival pass
+     * uses), instead of waiting for the completed response. */
+    expect(mockScrollAnchor).toHaveBeenCalledTimes(1);
+    const anchored = mockScrollAnchor.mock.calls[0]![1] as HTMLElement;
+    expect(anchored.getAttribute('data-msg-idx')).toBe('0');
   });
 
   it('switches to wiki mode via the toggle and sends through wiki_chat', async () => {
