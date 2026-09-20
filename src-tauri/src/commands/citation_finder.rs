@@ -62,9 +62,7 @@ pub fn begin_citation_run(
     progress: &Mutex<CitationFinderProgress>,
     cancel: &AtomicBool,
 ) -> Result<Option<CitationFinderProgress>, AppError> {
-    let Ok(mut prog) = progress.lock() else {
-        return Err(AppError::Import("Citation Finder mutex poisoned".to_string()));
-    };
+    let mut prog = crate::db::connection::lock_state(progress)?;
     if prog.is_running {
         return Ok(Some(prog.clone()));
     }
@@ -137,8 +135,9 @@ pub async fn find_citations(
         let emit = move |p: CitationFinderProgress| {
             /* Update shared snapshot (so cancel_citation_search + polling see
              * latest state) and emit the event. */
-            if let Ok(mut guard) = progress_snapshot.lock() {
-                *guard = p.clone();
+            match crate::db::connection::lock_state(&progress_snapshot) {
+                Ok(mut guard) => *guard = p.clone(),
+                Err(e) => eprintln!("[citation] progress snapshot lock failed: {e}"),
             }
             let _ = app_handle_for_emit.emit("citation:progress", p);
         };
@@ -174,11 +173,14 @@ pub async fn find_citations(
         };
 
         // Mark not-running in the snapshot regardless of outcome.
-        if let Ok(mut guard) = progress_for_task.lock() {
-            guard.is_running = false;
-            if cancel_for_task.load(Ordering::Relaxed) {
-                guard.is_cancelled = true;
+        match crate::db::connection::lock_state(&progress_for_task) {
+            Ok(mut guard) => {
+                guard.is_running = false;
+                if cancel_for_task.load(Ordering::Relaxed) {
+                    guard.is_cancelled = true;
+                }
             }
+            Err(e) => eprintln!("[citation] progress finalize lock failed: {e}"),
         }
 
         match result {
@@ -198,9 +200,7 @@ pub async fn find_citations(
         }
     });
 
-    let Ok(guard) = cf_state.progress.lock() else {
-        return Err(AppError::Import("Citation Finder mutex poisoned".to_string()));
-    };
+    let guard = crate::db::connection::lock_state(&cf_state.progress)?;
     Ok(guard.clone())
 }
 

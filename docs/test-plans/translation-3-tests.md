@@ -17,18 +17,18 @@ Pure helpers (`build_chunk_batches`, `build_chunk_batches_for_indices`, `batch_i
 
 | Test (`file::function`) | Purpose |
 | --- | --- |
-| `src-tauri/src/translation/engine.rs::build_chunk_batches_single_batch_when_small` | Small input packs into one batch with all ids in order |
-| `src-tauri/src/translation/engine.rs::build_chunk_batches_splits_when_large` | Tiny context window forces multiple batches |
-| `src-tauri/src/translation/engine.rs::build_chunk_batches_preserves_input_order` | Global + within-batch indices are ascending |
-| `src-tauri/src/translation/engine.rs::build_chunk_batches_every_chunk_exactly_once` | Every chunk index lands in exactly one batch (no skips/dups) |
-| `src-tauri/src/translation/engine.rs::build_chunk_batches_respects_floor_and_cap` | `batch_input_char_budget` clamps to [MIN, MAX] on all boundary inputs |
-| `src-tauri/src/translation/engine.rs::build_chunk_batches_for_indices_uses_original_ids` | Resend-round helper keeps original chunk ids in prompt + indices |
-| `src-tauri/src/translation/engine.rs::parse_batch_translation_response_happy_path` | JSON map parses all expected ids |
-| `src-tauri/src/translation/engine.rs::parse_batch_translation_response_missing_keys` | Missing keys reported in `missing` |
-| `src-tauri/src/translation/engine.rs::parse_batch_translation_response_empty_values_marked_missing` | Whitespace-only values are treated as missing |
-| `src-tauri/src/translation/engine.rs::parse_batch_translation_response_strips_markdown_fences` | ` ```json ... ``` ` wrapping is stripped before parse |
-| `src-tauri/src/translation/engine.rs::parse_batch_translation_response_malformed_falls_back_to_all_missing` | Unparseable response records all expected ids as missing |
-| `src-tauri/src/translation/engine.rs::parse_batch_translation_response_regex_fallback_extracts_embedded_json` | Embedded `{...}` block extracted via regex when wrapped in preamble |
+| `src-tauri/tests/translation/translation_engine_test.rs::build_chunk_batches_single_batch_when_small` | Small input packs into one batch with all ids in order |
+| `src-tauri/tests/translation/translation_engine_test.rs::build_chunk_batches_splits_when_large` | Tiny context window forces multiple batches |
+| `src-tauri/tests/translation/translation_engine_test.rs::build_chunk_batches_preserves_input_order` | Global + within-batch indices are ascending |
+| `src-tauri/tests/translation/translation_engine_test.rs::build_chunk_batches_every_chunk_exactly_once` | Every chunk index lands in exactly one batch (no skips/dups) |
+| `src-tauri/tests/translation/translation_engine_test.rs::build_chunk_batches_respects_floor_and_cap` | `batch_input_char_budget` clamps to [MIN, MAX] on all boundary inputs |
+| `src-tauri/tests/translation/translation_engine_test.rs::build_chunk_batches_for_indices_uses_original_ids` | Resend-round helper keeps original chunk ids in prompt + indices |
+| `src-tauri/tests/translation/translation_engine_test.rs::parse_batch_translation_response_happy_path` | JSON map parses all expected ids |
+| `src-tauri/tests/translation/translation_engine_test.rs::parse_batch_translation_response_missing_keys` | Missing keys reported in `missing` |
+| `src-tauri/tests/translation/translation_engine_test.rs::parse_batch_translation_response_empty_values_marked_missing` | Whitespace-only values are treated as missing |
+| `src-tauri/tests/translation/translation_engine_test.rs::parse_batch_translation_response_strips_markdown_fences` | ` ```json ... ``` ` wrapping is stripped before parse |
+| `src-tauri/tests/translation/translation_engine_test.rs::parse_batch_translation_response_malformed_falls_back_to_all_missing` | Unparseable response records all expected ids as missing |
+| `src-tauri/tests/translation/translation_engine_test.rs::parse_batch_translation_response_regex_fallback_extracts_embedded_json` | Embedded `{...}` block extracted via regex when wrapped in preamble |
 
 ## Rust integration tests (`tests/translation/auto_translate_full_text_test.rs`)
 

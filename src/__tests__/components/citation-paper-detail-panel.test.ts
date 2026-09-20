@@ -134,3 +134,30 @@ describe('citation-paper-detail-panel.vue - hidden-references messaging', () => 
     expect(events![0]).toEqual(['art-99']);
   });
 });
+
+describe('citation-paper-detail-panel.vue - authors rendering', () => {
+  it('renders_json_authors_as_formatted_list_not_raw_array_syntax', () => {
+    const wrapper = mount(CitationPaperDetailPanel, {
+      props: {
+        ...defaultProps(),
+        paper: makeArticleNode({
+          authors: JSON.stringify(['Pell, D', 'Mytton, O', 'Penney, TL']),
+        }),
+      },
+    });
+    const text = wrapper.text();
+    expect(text).toContain('Pell, D, Mytton, O, Penney, TL');
+    // The raw JSON payload must never leak into the panel.
+    expect(text).not.toContain('[');
+  });
+
+  it('renders_plain_string_authors_unchanged', () => {
+    const wrapper = mount(CitationPaperDetailPanel, {
+      props: {
+        ...defaultProps(),
+        paper: makeArticleNode({ authors: 'Smith J, Doe A' }),
+      },
+    });
+    expect(wrapper.text()).toContain('Smith J, Doe A');
+  });
+});

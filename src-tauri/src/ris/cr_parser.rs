@@ -240,12 +240,3 @@ pub fn parse_cr_entries(extras: &serde_json::Value) -> Vec<NewReferencePaper> {
 
     lines.iter().filter_map(|line| parse_cr_line(line)).collect()
 }
-
-/// Parse CR entries from a RIS extras JSON string.
-pub fn parse_cr_from_extras_json(extras_json: Option<&str>) -> Vec<NewReferencePaper> {
-    let extras = extras_json.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
-    match extras {
-        Some(v) => parse_cr_entries(&v),
-        None => vec![],
-    }
-}

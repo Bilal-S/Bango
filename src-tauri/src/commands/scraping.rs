@@ -53,7 +53,7 @@ impl ScrapingState {
     /// (the frontend's between-articles flag is the authoritative stop signal),
     /// so we recover rather than propagate.
     fn lock_active(&self) -> std::sync::MutexGuard<'_, Option<CancelToken>> {
-        self.active.lock().unwrap_or_else(|e| e.into_inner())
+        crate::db::connection::lock_state_or_recover(&self.active)
     }
 
     /// Install `token` as the active scrape token. Returns the previously

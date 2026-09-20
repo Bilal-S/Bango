@@ -5,4 +5,5 @@ mod language_detection_test;
 mod manual_translate_test;
 mod screening_translation_integration_test;
 mod summary_translation_integration_test;
+mod translation_engine_test;
 mod translation_queue_test;

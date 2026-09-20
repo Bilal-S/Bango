@@ -18,10 +18,7 @@ pub use authors::{
 };
 
 // Re-export institutions functions:
-pub use institutions::{
-    count_unmatched_affiliations, get_institutions_by_author, insert_author_affiliation,
-    upsert_institution,
-};
+pub use institutions::{get_institutions_by_author, insert_author_affiliation, upsert_institution};
 
 // Re-export networks functions:
 pub use networks::{

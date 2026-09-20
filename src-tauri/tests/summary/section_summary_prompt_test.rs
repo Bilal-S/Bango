@@ -15,10 +15,10 @@
 //! is where regressions most commonly surface.
 
 use bango_lib::summary::prompt::{
-    build_figure_description_prompt, build_section_context, build_synthesis_prompt,
-    ensure_schema_version_v2, filter_high_value_sections, merge_figure_descriptions_into_blob,
-    merge_summary_into_blob, merge_unified_blob, parse_figure_descriptions_response,
-    FigureDescription, TableDescription, ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT,
+    build_figure_description_prompt, build_section_context, ensure_schema_version_v2,
+    filter_high_value_sections, merge_figure_descriptions_into_blob, merge_summary_into_blob,
+    parse_figure_descriptions_response, FigureDescription,
+    ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT,
 };
 use bango_lib::utils::sections::{classify_sections, Caption, CaptionKind, Section, SectionKind};
 
@@ -558,89 +558,4 @@ fn merge_summary_into_blob_preserves_v2_when_existing_had_it_and_force_v2_false(
     );
     // Figures preserved AND schema_version preserved.
     assert!(value.get("figures").is_some());
-}
-
-// ── Tier 4.2: build_synthesis_prompt + merge_unified_blob ───────────────────
-
-#[test]
-fn build_synthesis_prompt_embeds_title_field_and_section_summaries() {
-    let section_summaries = r#"[{"section":"Methods","summary":"RCT N=1000."}]"#;
-    let prompt = build_synthesis_prompt("Sugar Tax Study", "medicine", section_summaries);
-    assert!(prompt.contains("Sugar Tax Study"), "title must be in prompt: {prompt}");
-    assert!(prompt.contains("medicine"), "field must be in prompt: {prompt}");
-    assert!(prompt.contains("RCT N=1000."), "section summaries must be embedded: {prompt}");
-    // Must ask for the synthesis digest keys.
-    assert!(prompt.contains("summary_150_250_words"));
-    assert!(prompt.contains("key_insights"));
-    assert!(prompt.contains("keywords"));
-}
-
-#[test]
-fn merge_unified_blob_combines_sections_figures_tables_and_synthesis() {
-    let existing = r#"{"field":"medicine","structured_extraction":{"study_type":"RCT"}}"#;
-    let section_summaries = r#"[{"section":"Methods","summary":"RCT."}]"#;
-    let figures = vec![FigureDescription {
-        number: "1".to_string(),
-        caption: "fig".to_string(),
-        description: "desc".to_string(),
-    }];
-    let tables = vec![TableDescription {
-        number: "2".to_string(),
-        caption: "tab".to_string(),
-        markdown: "| Col1 | Col2 |".to_string(),
-        description: "tdesc".to_string(),
-    }];
-    let synthesis =
-        r#"{"summary_150_250_words":"unified digest.","key_insights":["i1"],"keywords":["k1"]}"#;
-    let merged = merge_unified_blob(Some(existing), section_summaries, figures, tables, synthesis);
-    let value: serde_json::Value = serde_json::from_str(&merged).expect("merged must parse");
-    // Existing unknown key preserved.
-    assert_eq!(value.get("field").and_then(|v| v.as_str()), Some("medicine"));
-    assert!(value.get("structured_extraction").is_some());
-    // Section summaries overlaid.
-    assert_eq!(value.get("section_summaries").and_then(|v| v.as_array()).unwrap().len(), 1);
-    // Figures + tables overlaid.
-    assert_eq!(value["figures"].as_array().unwrap().len(), 1);
-    assert_eq!(value["tables"].as_array().unwrap().len(), 1);
-    // Synthesis digest keys overlaid.
-    assert_eq!(
-        value.get("summary_150_250_words").and_then(|v| v.as_str()),
-        Some("unified digest.")
-    );
-    // Schema version stamped.
-    assert_eq!(value.get("schema_version").and_then(|v| v.as_i64()), Some(2));
-    // TableDescription.markdown survives into the blob (the T4.3 fix).
-    assert_eq!(
-        value["tables"][0].get("markdown").and_then(|v| v.as_str()),
-        Some("| Col1 | Col2 |"),
-        "tables[0].markdown must be preserved for tables-as-GFM rendering"
-    );
-}
-
-#[test]
-fn merge_unified_blob_preserves_existing_unknown_keys() {
-    // The unified merge must preserve existing keys it does not produce
-    // (e.g. `structured_extraction` from the section call).
-    let existing = r#"{"structured_extraction":{"population":"N=1000"}}"#;
-    let section_summaries = "[]";
-    let synthesis = r#"{"summary_150_250_words":"d."}"#;
-    let merged = merge_unified_blob(Some(existing), section_summaries, vec![], vec![], synthesis);
-    let value: serde_json::Value = serde_json::from_str(&merged).expect("merged must parse");
-    assert!(
-        value.get("structured_extraction").is_some(),
-        "structured_extraction must survive the unified merge"
-    );
-    assert_eq!(value["structured_extraction"]["population"].as_str(), Some("N=1000"));
-}
-
-#[test]
-fn merge_unified_blob_handles_malformed_inputs_gracefully() {
-    // Malformed section_summaries / synthesis -> skip those keys; no panic.
-    let merged = merge_unified_blob(None, "not json", vec![], vec![], "also not json");
-    let value: serde_json::Value = serde_json::from_str(&merged).expect("merged must parse");
-    // schema_version is always stamped.
-    assert_eq!(value.get("schema_version").and_then(|v| v.as_i64()), Some(2));
-    // Malformed section_summaries/synthesis keys absent.
-    assert!(value.get("section_summaries").is_none());
-    assert!(value.get("summary_150_250_words").is_none());
 }

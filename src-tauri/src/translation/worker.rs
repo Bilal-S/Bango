@@ -86,7 +86,7 @@ pub fn spawn_translation_worker(app: tauri::AppHandle) -> TranslationWorkerHandl
             // cloud row).
             let (config, context_window_tokens, orchestrator) = {
                 let db = app_handle.state::<DbState>();
-                let conn = match db.conn.lock() {
+                let conn = match crate::db::connection::lock_conn(&db.conn) {
                     Ok(c) => c,
                     Err(e) => {
                         eprintln!("[translation] failed to lock DB for job {article_id}: {e}");

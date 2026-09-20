@@ -51,6 +51,26 @@ export function formatAuthors(
   return `${authors[0]} et al.`;
 }
 
+/** Parse a JSON-encoded author list (`'["Last, F", ...]'`) as stored on
+ * `articles.authors` / `reference_papers.authors` and surfaced verbatim by the
+ * bibliometric network payloads. Tolerates non-JSON strings (split on `;`),
+ * non-string array elements, and empty input; never throws. */
+export function parseAuthorList(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((a): a is string => typeof a === 'string' && a.trim() !== '');
+    }
+  } catch {
+    // Not a JSON array - fall through to delimited-string handling.
+  }
+  return raw
+    .split(';')
+    .map((a) => a.trim())
+    .filter((a) => a !== '');
+}
+
 /** Create DOI hyperlink if possible. */
 export function doiLink(doi: string | null | undefined): string | undefined {
   if (!doi) return undefined;

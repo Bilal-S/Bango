@@ -5,28 +5,6 @@ use crate::db::app_settings_repo::ScreeningMode;
 pub fn estimate_tokens(text: &str) -> usize {
     text.chars().count() / 4
 }
-
-/// Warning when worst-case per-article tokens exceed 80% of context window.
-#[must_use]
-pub fn check_context_window(
-    template_tokens: usize,
-    articles: &[usize],
-    context_window_tokens: usize,
-) -> Option<String> {
-    let worst_case = articles.iter().copied().max().unwrap_or(0) + template_tokens;
-    let threshold = (context_window_tokens as f64 * 0.8) as usize;
-
-    if worst_case > threshold {
-        Some(format!(
-            "Estimated worst-case per-article tokens ({}) exceed 80% of context window ({}). \
-             Articles with large abstracts may produce truncated responses.",
-            worst_case, threshold,
-        ))
-    } else {
-        None
-    }
-}
-
 /// Mode-aware worst-case per-article token footprint (§4.3 Readiness Check).
 /// Abstract: `abstract + template`. Enhanced: adds `chunk_budget/4`.
 /// TwoStage: adds `chunk_budget/4 * borderline_fraction` (only borderline articles

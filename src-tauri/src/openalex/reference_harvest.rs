@@ -49,6 +49,36 @@ pub async fn harvest_references_and_citations(
     }
 }
 
+/// Insert fetched works as reference papers and create typed links for one
+/// parent article. Shared by the outgoing-references and incoming-citations
+/// harvest paths, and the seam the integration test drives directly
+/// (`tests/openalex/openalex_import_test.rs::harvest_referenced_works_batch`).
+///
+/// Dedup-aware: `insert_or_find_paper` reuses an existing paper row when the
+/// DOI/title-fallback identity already exists. Insert failures are logged and
+/// skipped (the harvest is non-fatal). Returns the number of papers persisted.
+pub fn persist_harvested_papers(
+    conn: &rusqlite::Connection,
+    article_id: &str,
+    works: &[openalex::OpenAlexWork],
+    link_type: crate::models::reference::ReferenceType,
+) -> usize {
+    let mut written = 0usize;
+    for work in works {
+        let new_paper = mapping::map_work_to_reference_paper(work);
+        match reference_repo::insert_or_find_paper(conn, &new_paper) {
+            Ok((paper, _)) => {
+                let _ = reference_repo::create_link(conn, article_id, &paper.id, &link_type);
+                written += 1;
+            }
+            Err(e) => {
+                eprintln!("[openalex] harvest insert error for article {article_id}: {e}");
+            }
+        }
+    }
+    written
+}
+
 /// Write article-scoped audit error so harvest failures surface in Audit Timeline.
 fn log_harvest_error(db_state: &State<'_, DbState>, article_id: &str, details: &str) {
     match crate::db::connection::lock_conn(&db_state.conn) {
@@ -94,29 +124,19 @@ async fn harvest_outgoing_references(
                     return;
                 }
             };
-            for ref_work in &ref_works {
-                let new_paper = mapping::map_work_to_reference_paper(ref_work);
-                match reference_repo::insert_or_find_paper(&conn, &new_paper) {
-                    Ok((paper, _)) => {
-                        let _ = reference_repo::create_link(
-                            &conn,
-                            article_id,
-                            &paper.id,
-                            &crate::models::reference::ReferenceType::Reference,
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("[openalex] reference harvest insert error: {e}");
-                    }
-                }
-            }
+            let written = persist_harvested_papers(
+                &conn,
+                article_id,
+                &ref_works,
+                crate::models::reference::ReferenceType::Reference,
+            );
             let _ = audit_repo::create_entry(
                 &conn,
                 article_id,
                 "reference_import",
                 None,
                 None,
-                Some(&format!("Harvested {} OpenAlex references", ref_works.len())),
+                Some(&format!("Harvested {written} OpenAlex references")),
                 "system",
             );
         }
@@ -151,29 +171,19 @@ async fn harvest_incoming_citations(
                     return;
                 }
             };
-            for cite_work in &citing_works {
-                let new_paper = mapping::map_work_to_reference_paper(cite_work);
-                match reference_repo::insert_or_find_paper(&conn, &new_paper) {
-                    Ok((paper, _)) => {
-                        let _ = reference_repo::create_link(
-                            &conn,
-                            article_id,
-                            &paper.id,
-                            &crate::models::reference::ReferenceType::Citation,
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("[openalex] citation harvest insert error: {e}");
-                    }
-                }
-            }
+            let written = persist_harvested_papers(
+                &conn,
+                article_id,
+                &citing_works,
+                crate::models::reference::ReferenceType::Citation,
+            );
             let _ = audit_repo::create_entry(
                 &conn,
                 article_id,
                 "reference_import",
                 None,
                 None,
-                Some(&format!("Harvested {} OpenAlex citations", citing_works.len())),
+                Some(&format!("Harvested {written} OpenAlex citations")),
                 "system",
             );
         }

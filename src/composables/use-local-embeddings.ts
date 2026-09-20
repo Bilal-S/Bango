@@ -37,7 +37,7 @@ export interface ComponentProgress {
 }
 
 /** Verification outcome (`verify_local_embeddings`). */
-export interface VerifyOutcome {
+interface VerifyOutcome {
   healthy: boolean;
   failures: { name: string; reason: string }[];
 }

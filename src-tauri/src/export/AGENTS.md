@@ -68,7 +68,7 @@ DOIs case-insensitively, so legacy backups restore canonical values without
 creating case-variant duplicates. Migration v009 cannot backstop this path
 (it runs at startup, before any restore).
 
-#### `import_project` decomposition (refactor v5, see `.worktrees/refactor5.md` + `docs/test-plans/refactor5-tests.md`)
+#### `import_project` decomposition (refactor v5, see `docs/test-plans/refactor5-tests.md`)
 
 The 780-line monolith is now ~75 lines of orchestration calling 20 per-table
 `import_*` fns (one per table, dependency-ordered). `ImportMaps` threads the 4

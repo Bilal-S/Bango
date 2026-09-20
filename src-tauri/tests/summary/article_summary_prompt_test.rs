@@ -8,7 +8,8 @@
 //! Also regression-guards `strip_code_fences` against the screening
 //! `extract_json` corruption bug (see `strip_code_fences_preserves_object_with_section_summaries`).
 use bango_lib::screening::engine::extract_json;
-use bango_lib::summary::prompt::{strip_code_fences, ARTICLE_SUMMARY_SYSTEM_PROMPT};
+use bango_lib::summary::prompt::ARTICLE_SUMMARY_SYSTEM_PROMPT;
+use bango_lib::utils::json_repair::strip_code_fences;
 
 /// The prompt must never regress to the placeholder that caused
 /// "Invalid JSON response from LLM: expected value at line 1 column 1".

@@ -427,23 +427,6 @@ pub fn clear_generic_audit(db_state: State<'_, DbState>) -> Result<usize, AppErr
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     audit_repo::clear_generic_entries(&conn)
 }
-
-/// Re-attempt journal matching for all articles and reference papers that have
-/// `journal_index_id IS NULL` and `reference_type = 'JOUR'`.
-/// Returns `{ "articles": <n>, "references": <m> }`.
-#[tauri::command]
-pub fn rematch_journals(db_state: State<'_, DbState>) -> Result<serde_json::Value, AppError> {
-    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-
-    let articles_matched = article_repo::rematch_all_journals(&conn)?;
-    let refs_matched = crate::db::reference_repo::rematch_all_journals(&conn)?;
-
-    Ok(serde_json::json!({
-        "articles": articles_matched,
-        "references": refs_matched,
-    }))
-}
-
 /// Fetch full metadata + time-series for one journal_index row.
 /// Powers the timeline Journal Info Card. Returns `None` for an unknown id.
 #[tauri::command]

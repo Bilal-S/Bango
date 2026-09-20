@@ -189,9 +189,6 @@ describe('useChatStore', () => {
 
   it('citation_finder_source_toggle', () => {
     const store = useChatStore();
-    store.setCitationFinderReady(true);
-    expect(store.citationFinderReady).toBe(true);
-
     store.setSource('citation-finder');
     expect(store.source).toBe('citation-finder');
 

@@ -83,7 +83,6 @@ export function useDedup() {
     try {
       await tauriCommand('resolve_fuzzy_match', {
         request: {
-          pairIndex: 0,
           resolution,
           articleAId: pair.articleAId,
           articleBId: pair.articleBId,

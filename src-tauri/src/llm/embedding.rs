@@ -19,10 +19,6 @@ struct EmbeddingRequest {
 #[derive(Debug, Deserialize)]
 struct EmbeddingResponse {
     data: Vec<EmbeddingData>,
-    // Deserialized for future token accounting; not currently read.
-    #[serde(default)]
-    #[allow(dead_code)]
-    usage: Option<EmbeddingUsage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -30,13 +26,6 @@ struct EmbeddingData {
     embedding: Vec<f32>,
     #[serde(default)]
     index: Option<usize>,
-}
-
-#[derive(Debug, Deserialize)]
-struct EmbeddingUsage {
-    #[serde(default)]
-    #[allow(dead_code)]
-    total_tokens: Option<usize>,
 }
 
 // ── Ollama request/response ─────────────────────────────────────────────────

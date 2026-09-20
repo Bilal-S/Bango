@@ -73,26 +73,26 @@ private internals (`merge_outputs`, `pool_finalists`, `ClaimWork`, `Finalists`)
 | `src-tauri/tests/citation_finder/citation_finder_mod_test.rs::filter_valid_statuses_keeps_valid_three` | whitelist keeps the 3 valid statuses |
 | `src-tauri/tests/citation_finder/citation_finder_mod_test.rs::filter_valid_statuses_drops_duplicate_status` | `duplicate` always dropped |
 | `src-tauri/tests/citation_finder/citation_finder_mod_test.rs::filter_valid_statuses_empty_input_returns_empty` | empty → empty (no "all statuses" fallback) |
-| `src-tauri/src/citation_finder/search.rs::normalize_claim_key_trims_and_lowercases` | claim-key normalization (case+trim) |
-| `src-tauri/src/citation_finder/search.rs::normalize_claim_key_collapses_internal_whitespace` | whitespace-run collapse |
-| `src-tauri/src/citation_finder/search.rs::merge_whole_block_uses_empty_claim_key` | whole-block cosine flows to confidence |
-| `src-tauri/src/citation_finder/search.rs::merge_per_statement_handles_claim_whitespace_drift` | cosmetic claim drift does not lose cosine |
-| `src-tauri/src/citation_finder/search.rs::merge_per_statement_handles_claim_case_drift` | case drift tolerated |
-| `src-tauri/src/citation_finder/search.rs::merge_drops_hallucinated_article_id` | unknown article_id dropped |
-| `src-tauri/src/citation_finder/search.rs::merge_drops_unrelated_and_garbage_classifications` | "unrelated"/garbage dropped |
-| `src-tauri/src/citation_finder/search.rs::merge_truncates_to_ten` | 10-result cap |
-| `src-tauri/src/citation_finder/search.rs::merge_confidence_negative_cosine_normalizes_correctly` | NEG_INFINITY seed preserves negative cosine |
-| `src-tauri/src/citation_finder/search.rs::merge_confidence_missing_cosine_falls_to_neutral` | missing recall → 0.5 neutral |
-| `src-tauri/src/citation_finder/search.rs::pool_finalists_dedups_article_ids_keeping_best_score` | union dedup |
-| `src-tauri/src/citation_finder/search.rs::pool_finalists_truncates_to_fifteen` | 15-finalist cap (correlated cosine adds nothing) |
-| `src-tauri/src/citation_finder/search.rs::pool_finalists_cosine_union_rescues_low_containment_article` | weak-containment/top-cosine article kept via the union |
-| `src-tauri/src/citation_finder/search.rs::pool_finalists_caps_union_at_twenty` | union capped at 20 finalists |
-| `src-tauri/src/citation_finder/search.rs::pool_finalists_filters_passages_to_finalist_set` | per-claim passages filtered to finalists (prompt hygiene) |
-| `src-tauri/src/citation_finder/search.rs::cosine_best_chunk_resolves_valid_index` | provenance index → that chunk |
-| `src-tauri/src/citation_finder/search.rs::cosine_best_chunk_title_abstract_row_is_none` | `-1` sentinel row is not a chunk |
-| `src-tauri/src/citation_finder/search.rs::cosine_best_chunk_out_of_range_is_none` | stale out-of-range index → None |
-| `src-tauri/src/citation_finder/search.rs::cosine_best_chunk_missing_provenance_is_none` | None provenance → None |
-| `src-tauri/src/citation_finder/search.rs::merge_grounds_against_abstract_context` | justifying sentence quoted from the abstract context survives grounding |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::normalize_claim_key_trims_and_lowercases` | claim-key normalization (case+trim) |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::normalize_claim_key_collapses_internal_whitespace` | whitespace-run collapse |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::merge_whole_block_uses_empty_claim_key` | whole-block cosine flows to confidence |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::merge_per_statement_handles_claim_whitespace_drift` | cosmetic claim drift does not lose cosine |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::merge_per_statement_handles_claim_case_drift` | case drift tolerated |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::merge_drops_hallucinated_article_id` | unknown article_id dropped |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::merge_drops_unrelated_and_garbage_classifications` | "unrelated"/garbage dropped |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::merge_truncates_to_ten` | 10-result cap |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::merge_confidence_negative_cosine_normalizes_correctly` | NEG_INFINITY seed preserves negative cosine |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::merge_confidence_missing_cosine_falls_to_neutral` | missing recall → 0.5 neutral |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::pool_finalists_dedups_article_ids_keeping_best_score` | union dedup |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::pool_finalists_truncates_to_fifteen` | 15-finalist cap (correlated cosine adds nothing) |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::pool_finalists_cosine_union_rescues_low_containment_article` | weak-containment/top-cosine article kept via the union |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::pool_finalists_caps_union_at_twenty` | union capped at 20 finalists |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::pool_finalists_filters_passages_to_finalist_set` | per-claim passages filtered to finalists (prompt hygiene) |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::cosine_best_chunk_resolves_valid_index` | provenance index → that chunk |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::cosine_best_chunk_title_abstract_row_is_none` | `-1` sentinel row is not a chunk |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::cosine_best_chunk_out_of_range_is_none` | stale out-of-range index → None |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::cosine_best_chunk_missing_provenance_is_none` | None provenance → None |
+| `src-tauri/tests/citation_finder/citation_finder_search_test.rs::merge_grounds_against_abstract_context` | justifying sentence quoted from the abstract context survives grounding |
 | `src-tauri/tests/citation_finder/citation_finder_search_test.rs::normalize_claim_key_drift_tolerant_pipeline_contract` | external pin on the pub helper |
 | `src-tauri/tests/citation_finder/citation_finder_search_test.rs::normalize_claim_key_empty_input_is_stable` | empty → "" (whole-block key) |
 | `src-tauri/tests/citation_finder/citation_finder_search_test.rs::normalize_claim_key_does_not_strip_punctuation` | punctuation preserved (conservative) |

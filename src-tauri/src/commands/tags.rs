@@ -62,13 +62,6 @@ pub struct TagWithCount {
     pub color: Option<String>,
     pub article_count: usize,
 }
-
-#[tauri::command]
-pub fn get_tags(db_state: State<'_, DbState>) -> Result<Vec<Tag>, AppError> {
-    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    tag_repo::get_all_tags(&conn)
-}
-
 #[tauri::command]
 pub fn get_tags_with_counts(db_state: State<'_, DbState>) -> Result<Vec<TagWithCount>, AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;

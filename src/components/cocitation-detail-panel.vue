@@ -47,7 +47,9 @@
       <!-- Paper info -->
       <template v-else>
         <p class="text-sm font-semibold text-slate-800 leading-snug">{{ paper.title }}</p>
-        <p v-if="paper.authors" class="text-xs text-slate-500 mt-1">{{ paper.authors }}</p>
+        <p v-if="authorList.length" class="text-xs text-slate-500 mt-1">
+          {{ formatAuthors(authorList, authorList.length) }}
+        </p>
         <div class="flex items-center gap-3 mt-2 text-[11px] text-slate-400">
           <span v-if="paper.year">{{ paper.year }}</span>
           <span v-if="paper.journal" class="italic truncate">{{ paper.journal }}</span>
@@ -125,7 +127,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { CocitationNode } from '../types/biblio-cocitation';
-import { getPublicationTypeLabel } from '@/utils/formatters';
+import { formatAuthors, getPublicationTypeLabel, parseAuthorList } from '@/utils/formatters';
 
 const props = defineProps<{
   paper: CocitationNode | null;
@@ -137,6 +139,11 @@ defineEmits<{
   (e: 'navigate-paper', nodeId: string): void;
   (e: 'open-linked-record', articleId: string): void;
 }>();
+
+/** Parsed author list. The backend sends `authors` as a JSON-encoded string
+ * (legacy rows may carry a plain delimited string); parse before formatting so
+ * the raw array payload never renders. */
+const authorList = computed(() => parseAuthorList(props.paper?.authors));
 
 /** Max co-citation weight for the strength bar scaling. */
 const maxCoCiteWeight = computed(() => {

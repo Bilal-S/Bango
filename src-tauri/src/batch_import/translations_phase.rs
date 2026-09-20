@@ -73,7 +73,7 @@ where
     failures). Must run before worker-handle resolution so CI/test
     environments short-circuit cleanly. Mirrors Phase 4. */
     {
-        let conn = match db_state.conn.lock() {
+        let conn = match crate::db::connection::lock_conn(&db_state.conn) {
             Ok(c) => c,
             Err(e) => {
                 return BatchImportPhaseResult {
@@ -125,7 +125,7 @@ where
         // Pre-enqueue status read. Not passed to `wait_for_translation`:
         // enqueuing mutates DB status. `wait_for_translation` always polls live.
         let (language, is_translated) = {
-            let conn = match db_state.conn.lock() {
+            let conn = match crate::db::connection::lock_conn(&db_state.conn) {
                 Ok(c) => c,
                 Err(e) => {
                     failed += 1;
@@ -159,7 +159,7 @@ where
         // Enqueue via the standard gate (writes 'queued' + sends). The gate is
         // idempotent - if the article is already queued/running, it skips.
         let enqueued = {
-            let conn = match db_state.conn.lock() {
+            let conn = match crate::db::connection::lock_conn(&db_state.conn) {
                 Ok(c) => c,
                 Err(e) => {
                     failed += 1;
@@ -248,7 +248,7 @@ async fn wait_for_translation(
         tokio::time::sleep(poll_interval).await;
 
         let (status, is_translated, error_msg) = {
-            let conn = match db_state.conn.lock() {
+            let conn = match crate::db::connection::lock_conn(&db_state.conn) {
                 Ok(c) => c,
                 Err(e) => return WaitOutcome::Error(e.to_string()),
             };
@@ -274,27 +274,5 @@ async fn wait_for_translation(
             });
         }
         // status == "running" || "queued" -> keep polling.
-    }
-}
-
-/// Public per-article wait helper (for summary-phase gating and tests).
-/// Polls live status; resolves once `translation_status` leaves `'running'`.
-pub async fn wait_for_translation_if_needed(
-    db_state: &State<'_, DbState>,
-    article_id: &str,
-) -> Result<(), String> {
-    // Always poll the live status; no stale entry-status shortcut.
-    let outcome = wait_for_translation(
-        db_state,
-        article_id,
-        Duration::from_secs(TRANSLATION_WAIT_TIMEOUT_SECS),
-        Duration::from_millis(TRANSLATION_POLL_INTERVAL_MS),
-    )
-    .await;
-    match outcome {
-        WaitOutcome::Succeeded => Ok(()),
-        WaitOutcome::Timeout => Err("translation timed out".to_string()),
-        WaitOutcome::Failed(msg) => Err(msg),
-        WaitOutcome::Error(e) => Err(e),
     }
 }

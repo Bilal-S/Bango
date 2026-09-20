@@ -285,7 +285,7 @@ pub async fn start_screening(
                 // `run_sync` will overwrite phase shortly after the chunk pass.
                 let _ = app_handle.emit("screening:progress", &prog);
             }
-            if let Ok(conn) = db.conn.lock() {
+            if let Ok(conn) = crate::db::connection::lock_conn(&db.conn) {
                 let app_for_cb = app_handle.clone();
                 let cb = move |done: usize, total: usize, article_id: &str| {
                     // Emit a log line every article (low volume relative to the
@@ -306,6 +306,8 @@ pub async fn start_screening(
                     crate::commands::full_text::ensure_chunks_for_full_text_articles_with_progress(
                         &conn, false, &cb,
                     );
+            } else {
+                eprintln!("[screening:diag] chunk pre-pass DB lock failed (poisoned mutex)");
             }
         }
 
@@ -330,9 +332,11 @@ pub async fn start_screening(
         // actually processed (completed > 0).
         let completed = engine.get_progress().await.completed;
         if completed > 0 {
-            if let Ok(conn) = db.conn.lock() {
+            if let Ok(conn) = crate::db::connection::lock_conn(&db.conn) {
                 crate::db::app_settings_repo::mark_biblio_needs_refresh(&conn);
                 crate::db::app_settings_repo::mark_wiki_needs_refresh(&conn);
+            } else {
+                eprintln!("[screening:diag] staleness-flag DB lock failed (poisoned mutex)");
             }
         }
 
@@ -403,51 +407,6 @@ pub fn reset_working_list(db_state: State<'_, DbState>) -> Result<usize, AppErro
     let count = article_repo::reset_working_list(&conn)?;
     Ok(count)
 }
-
-#[tauri::command]
-pub fn estimate_screening_tokens(db_state: State<'_, DbState>) -> Result<Option<String>, AppError> {
-    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-
-    let config = crate::llm::effective_config::resolve_no_decrypt(&conn)?
-        .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
-
-    let max_len = article_repo::max_article_char_len(&conn)?;
-    if max_len == 0 {
-        return Ok(None);
-    }
-
-    // Tier 3 Gap 5: mode-aware worst-case footprint per §4.3. Previously this
-    // always computed `abstract_tokens + template_tokens`, ignoring the
-    // Enhanced chunk budget and the Two-stage borderline overhead. Now both
-    // command entry points (`get_screening_readiness`, `estimate_screening_tokens`)
-    // route through the same pure helper so their estimates stay in sync.
-    let mode = app_settings_repo::get_screening_mode(&conn)?;
-    let chunk_budget = app_settings_repo::get_chunk_budget_per_article(&conn)?;
-    let borderline_fraction = app_settings_repo::get_two_stage_expected_borderline_fraction(&conn)?;
-
-    let template_text = crate::screening::prompt::SYSTEM_PROMPT.to_string();
-    let template_tokens = token_estimation::estimate_tokens(&template_text);
-    let abstract_tokens = max_len / 4;
-    let worst_case = token_estimation::worst_case_per_article_tokens(
-        mode,
-        abstract_tokens,
-        template_tokens,
-        chunk_budget,
-        borderline_fraction,
-    );
-
-    let threshold = (config.context_window_tokens as f64 * 0.8) as usize;
-    if worst_case > threshold {
-        Ok(Some(format!(
-            "Estimated worst-case per-article tokens ({}) exceed 80% of context window ({}). \
-             Articles with large abstracts may produce truncated responses.",
-            worst_case, threshold,
-        )))
-    } else {
-        Ok(None)
-    }
-}
-
 // ── Tier 3 screening-mode commands ──────────────────────────────────────────
 
 /// Read the active screening mode (`abstract` | `enhanced` | `two_stage`).
@@ -686,9 +645,13 @@ pub async fn screen_article(
         // Tier 3: for enhanced / two-stage, backfill chunks for the target
         // article if it has full text but no chunks (pure CPU, no LLM).
         if screening_config.mode != ScreeningMode::Abstract {
-            if let Ok(conn) = db.conn.lock() {
+            if let Ok(conn) = crate::db::connection::lock_conn(&db.conn) {
                 let _ =
                     crate::commands::full_text::ensure_chunks_for_full_text_articles(&conn, false);
+            } else {
+                eprintln!(
+                    "[screening:diag] targeted chunk backfill DB lock failed (poisoned mutex)"
+                );
             }
         }
 
@@ -711,9 +674,11 @@ pub async fn screen_article(
         // alters the bibliometric corpus. Mark it stale.
         let completed = engine.get_progress().await.completed;
         if completed > 0 {
-            if let Ok(conn) = db.conn.lock() {
+            if let Ok(conn) = crate::db::connection::lock_conn(&db.conn) {
                 crate::db::app_settings_repo::mark_biblio_needs_refresh(&conn);
                 crate::db::app_settings_repo::mark_wiki_needs_refresh(&conn);
+            } else {
+                eprintln!("[screening:diag] staleness-flag DB lock failed (poisoned mutex)");
             }
         }
 

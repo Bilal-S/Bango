@@ -49,7 +49,9 @@
       <!-- Paper info -->
       <template v-else>
         <p class="text-sm font-semibold text-slate-800 leading-snug">{{ paper.title }}</p>
-        <p v-if="paper.authors" class="text-xs text-slate-500 mt-1">{{ paper.authors }}</p>
+        <p v-if="authorList.length" class="text-xs text-slate-500 mt-1">
+          {{ formatAuthors(authorList, authorList.length) }}
+        </p>
         <div class="flex items-center gap-3 mt-2 text-[11px] text-slate-400">
           <span v-if="paper.year">{{ paper.year }}</span>
           <span v-if="paper.journal" class="italic truncate">{{ paper.journal }}</span>
@@ -223,7 +225,7 @@
 import { computed } from 'vue';
 import type { CitationNode } from '../types/biblio-citation';
 import type { IsolationDirection } from './citation-network-graph.vue';
-import { getPublicationTypeLabel } from '@/utils/formatters';
+import { formatAuthors, getPublicationTypeLabel, parseAuthorList } from '@/utils/formatters';
 
 const props = defineProps<{
   paper: CitationNode | null;
@@ -234,6 +236,11 @@ const props = defineProps<{
   /** Phase 3 - Main Path (SPC): set of node IDs on the main path backbone. */
   mainPathNodes?: Set<string>;
 }>();
+
+/** Parsed author list. The backend sends `authors` as a JSON-encoded string
+ * (legacy rows may carry a plain delimited string); parse before formatting so
+ * the raw array payload never renders. */
+const authorList = computed(() => parseAuthorList(props.paper?.authors));
 
 /** Whether the currently-selected paper is on the main path backbone. */
 const onMainPath = computed(

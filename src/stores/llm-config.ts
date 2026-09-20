@@ -141,7 +141,6 @@ export const useLlmConfigStore = defineStore('llm-config', () => {
     testResult,
     backend,
     localReady,
-    localSupported,
     isConfigured,
     fetchIfNeeded,
     fetch,

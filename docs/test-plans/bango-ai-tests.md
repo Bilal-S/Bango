@@ -36,12 +36,12 @@ marker in the test file identifies un-implemented rows.
 
 | Test | Assertion |
 |---|---|
-| `src-tauri/src/llm/local/engine.rs::engine_starts_lazily_and_publishes_effective_endpoint` | First effective-config request starts the server and returns the loopback config |
-| `src-tauri/src/llm/local/engine.rs::engine_stop_releases_the_process` | Hard stop kills the child and returns to Stopped (native sleep stays the idle strategy) |
-| `src-tauri/src/llm/local/engine.rs::engine_restarts_once_then_reports_failed` | Start attempts are bounded by the attempt budget; the crash budget only counts a Ready-then-dead server; exhaustion fails actionably |
-| `src-tauri/src/llm/local/engine.rs::engine_reset_is_off_thread_and_waits_for_in_flight` | Reset never blocks a caller and observes in-flight requests |
-| `src-tauri/src/llm/local/engine.rs::port_selection_retries_a_lost_race` | Bind-0 race retries and eventually fails actionably |
-| `src-tauri/src/llm/local/engine.rs::reserved_port_is_stable_before_start_and_rereleased_on_retry` | The held listener keeps the reserved port bound until spawn; a retry re-reserves and republishes a fresh port |
+| `src-tauri/tests/llm/llm_local_engine_test.rs::engine_starts_lazily_and_publishes_effective_endpoint` | First effective-config request starts the server and returns the loopback config |
+| `src-tauri/tests/llm/llm_local_engine_test.rs::engine_stop_releases_the_process` | Hard stop kills the child and returns to Stopped (native sleep stays the idle strategy) |
+| `src-tauri/tests/llm/llm_local_engine_test.rs::engine_restarts_once_then_reports_failed` | Start attempts are bounded by the attempt budget; the crash budget only counts a Ready-then-dead server; exhaustion fails actionably |
+| `src-tauri/tests/llm/llm_local_engine_test.rs::engine_reset_is_off_thread_and_waits_for_in_flight` | Reset never blocks a caller and observes in-flight requests |
+| `src-tauri/tests/llm/llm_local_engine_test.rs::port_selection_retries_a_lost_race` | Bind-0 race retries and eventually fails actionably |
+| `src-tauri/tests/llm/llm_local_engine_test.rs::reserved_port_is_stable_before_start_and_rereleased_on_retry` | The held listener keeps the reserved port bound until spawn; a retry re-reserves and republishes a fresh port |
 | `src-tauri/tests/commands/bango_ai_test.rs::status_reports_derived_state_hardware_and_paths` | Status helper returns derived state, verdict, sizes, and resolved paths |
 | `src-tauri/tests/commands/bango_ai_test.rs::install_preflight_gates_target_and_disk` | Preflight rejects unsupported targets and short disk before any download |
 | `src-tauri/tests/commands/bango_ai_test.rs::verify_and_remove_are_idempotent` | Repeat verify/remove leave a healthy or clean state without errors |
@@ -52,7 +52,7 @@ marker in the test file identifies un-implemented rows.
 | `src-tauri/tests/commands/bango_ai_test.rs::repair_install_restarts_engine_before_self_test` | Any install stops a running engine before touching artifacts; the self-test restarts it |
 | `src-tauri/tests/commands/bango_ai_test.rs::activation_persists_backend_only_after_self_test` | llm_backend stays configured_provider through cancel/failure and flips only on self-test success |
 | `src-tauri/tests/commands/bango_ai_test.rs::engine_status_and_persisted_settings_agree_after_restart` | A freshly seeded engine reports the persisted context/threads in the status payload |
-| `src-tauri/src/llm/local/engine.rs::busy_engine_reports_in_flight_and_queued_state` | In-flight accounting exposes a busy/queued state for the status event |
+| `src-tauri/tests/llm/llm_local_engine_test.rs::busy_engine_reports_in_flight_and_queued_state` | In-flight accounting exposes a busy/queued state for the status event |
 ## T6 routing and readiness
 
 | Test | Assertion |
@@ -97,7 +97,6 @@ marker in the test file identifies un-implemented rows.
 | `src/__tests__/components/settings-backend-selection.test.ts::provider_selection_persists_configured_provider` | Choosing Configured Provider persists llm_backend = configured_provider |
 | `src/__tests__/components/settings-backend-selection.test.ts::consent_install_shows_progress_card_before_activation` | A consent-triggered install mounts the progress card and its error without the backend being selected |
 | `src/__tests__/components/settings-bango-ai-card.test.ts::restored_selection_without_components_offers_setup_or_switch` | The not-set-up state offers Set Up / Use Configured Provider and triggers nothing automatic |
-| `src/__tests__/components/bango-ai-contextual-activation.test.ts::not_ready_backend_offers_in_place_setup_or_switch` | A gated feature hitting not-ready Bango AI offers Set Up / Use Configured Provider / Cancel without a Settings trip |
 | `src/__tests__/components/bango-ai-consent-dialog.test.ts::shows_model_size_and_license_and_emits_confirm` | Consent names the model, size, MIT link, and emits confirm/cancel |
 | `src/__tests__/components/help-tab-reference.test.ts::renders_bango_ai_section_below_embeddings` | Help section exists in order with non-technical content |
 | `src/__tests__/components/settings-bango-ai-card.test.ts::unsupported_target_renders_blocked_state_without_cloud_fallback` | The panel shows the actionable unavailable state and never promises cloud fallback |

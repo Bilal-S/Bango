@@ -435,32 +435,6 @@ pub fn delete_article_references(
 
     Ok(())
 }
-
-/// Insert a reference paper (or find existing by DOI/title).
-#[tauri::command]
-pub fn upsert_reference_paper(
-    db_state: tauri::State<'_, DbState>,
-    paper: NewReferencePaper,
-) -> Result<ReferencePaperResult, AppError> {
-    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-
-    let (paper, was_created) = reference_repo::insert_or_find_paper(&conn, &paper)?;
-
-    // Auto-match to article if newly created
-    if was_created {
-        if let Ok(Some(matched_id)) = reference_repo::auto_match_paper_to_article(&conn, &paper) {
-            let _ = reference_repo::update_paper_match(
-                &conn,
-                &paper.id,
-                &MatchStatus::Matched,
-                Some(&matched_id),
-            );
-        }
-    }
-
-    Ok(ReferencePaperResult { paper, was_created })
-}
-
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReferencePaperResult {

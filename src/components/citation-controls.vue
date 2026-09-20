@@ -388,13 +388,10 @@ watch(
  *  sync with parent's minYear/maxYear for programmatic resets. */
 const yearStart = ref(props.minYear);
 const yearEnd = ref(props.maxYear);
-watch(
-  () => [props.minYear, props.maxYear] as const,
-  ([mn, mx]) => {
-    yearStart.value = mn;
-    yearEnd.value = mx;
-  }
-);
+watch([() => props.minYear, () => props.maxYear], ([mn, mx]) => {
+  yearStart.value = mn;
+  yearEnd.value = mx;
+});
 const yearActive = computed(
   () => yearStart.value !== props.minYear || yearEnd.value !== props.maxYear
 );

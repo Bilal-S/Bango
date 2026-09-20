@@ -245,11 +245,6 @@ export type LlmProvider =
   | 'lmStudio'
   | 'custom';
 
-export interface HealthCheck {
-  status: string;
-  articleCount: number;
-}
-
 export interface ScreeningProgress {
   total: number;
   completed: number;

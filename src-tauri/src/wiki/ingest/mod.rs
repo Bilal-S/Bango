@@ -53,9 +53,7 @@ pub const MAX_SOURCE_CHARS: usize = 48_000; // ~12k tokens
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IngestReport {
-    pub raw_sources_read: usize,
     pub pages_written: usize,
-    pub pages_skipped: usize,
     pub source_chars_truncated: bool,
     /// Batches whose response hit the output budget (provider flag or
     /// structural cut) at least once (Change 4).

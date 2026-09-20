@@ -42,14 +42,20 @@ impl StartupStatus {
     /// Read the current snapshot value. A poisoned mutex is treated as
     /// `Legacy` (fail-safe: the upgrade would rather re-run than silently skip).
     fn snapshot(&self) -> SchemaStatus {
-        self.schema.lock().map(|g| *g).unwrap_or(SchemaStatus::Legacy)
+        match crate::db::connection::lock_state(&self.schema) {
+            Ok(g) => *g,
+            // Poisoned = an upgrade panicked mid-write; state unknown, so the
+            // fail-safe choice is Legacy (the upgrade re-runs rather than
+            // being silently skipped).
+            Err(_) => SchemaStatus::Legacy,
+        }
     }
 
     /// Update the snapshot after a schema change (e.g. successful upgrade).
     fn set(&self, status: SchemaStatus) {
-        if let Ok(mut g) = self.schema.lock() {
-            *g = status;
-        }
+        // Recovering is correct here: writing the fresh status after a panic
+        // under the lock is strictly better than dropping the update.
+        *crate::db::connection::lock_state_or_recover(&self.schema) = status;
     }
 }
 

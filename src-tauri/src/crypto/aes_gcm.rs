@@ -49,15 +49,6 @@ pub fn derive_key_from_machine() -> [u8; 32] {
         key
     })
 }
-
-/// Derives a 256-bit key from a user-provided password.
-#[must_use]
-pub fn derive_key_from_password(password: &str) -> [u8; 32] {
-    let mut key = [0u8; 32];
-    pbkdf2_hmac::<Sha256>(password.as_bytes(), SALT, iterations(), &mut key);
-    key
-}
-
 /// Encrypts plaintext using AES-256-GCM. Returns base64-encoded nonce+ciphertext.
 pub fn encrypt(plaintext: &[u8], key: &[u8; 32]) -> Result<String, AesGcmError> {
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| AesGcmError)?;

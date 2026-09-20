@@ -151,7 +151,7 @@ const canScreenArticle = computed(
 /* Reset local flag when article prop reflects post-screening state. This is
    the primary completion trigger, fired after `refreshArticle` resolves. */
 watch(
-  () => [props.article.status, props.article.screenedAt, props.article.screeningError] as const,
+  [() => props.article.status, () => props.article.screenedAt, () => props.article.screeningError],
   ([status, screenedAt, screeningError]) => {
     if (isScreening.value && (status !== 'working' || screenedAt || screeningError)) {
       isScreening.value = false;

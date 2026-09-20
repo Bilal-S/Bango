@@ -124,11 +124,6 @@ pub fn export_ris_for_ids_to_file(
     let content = articles_to_ris_export(&articles, &criteria_map);
     std::fs::write(&path, content).map_err(AppError::Io)
 }
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExportProjectRequest {}
-
 #[tauri::command]
 pub fn export_project_backup(db_state: State<'_, DbState>) -> Result<String, AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;

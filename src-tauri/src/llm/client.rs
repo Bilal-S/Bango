@@ -306,9 +306,9 @@ fn is_chat_model(id: &str) -> bool {
 
 // ── Shared HTTP client + retry ───────────────────────────────────────
 
-const LLM_MAX_RETRIES: u32 = 3;
-const LLM_INITIAL_BACKOFF_MS: u64 = 1000;
-const LLM_MAX_BACKOFF_MS: u64 = 10_000;
+pub const LLM_MAX_RETRIES: u32 = 3;
+pub const LLM_INITIAL_BACKOFF_MS: u64 = 1000;
+pub const LLM_MAX_BACKOFF_MS: u64 = 10_000;
 
 /// Side-channel metadata from [`send_chat_completion`].
 ///
@@ -424,7 +424,7 @@ fn anthropic_latch_cap(model: &str, cap: i64) {
 /// [`ANTHROPIC_OVER_CAP_MARKER`]) so unrelated 400s (temperature, body shape,
 /// auth) never trigger a back-down retry.
 #[must_use]
-fn is_over_cap_error(msg: &str) -> bool {
+pub fn is_over_cap_error(msg: &str) -> bool {
     msg.contains("max_tokens") && msg.contains(ANTHROPIC_OVER_CAP_MARKER)
 }
 
@@ -433,7 +433,7 @@ fn is_over_cap_error(msg: &str) -> bool {
 /// `None` when no positive limit can be extracted (proxy wording variance);
 /// callers then fall back to [`ANTHROPIC_SAFE_MAX_TOKENS`].
 #[must_use]
-fn parse_model_cap(msg: &str) -> Option<i64> {
+pub fn parse_model_cap(msg: &str) -> Option<i64> {
     let start = msg.find("max_tokens:")?;
     let gt = msg[start..].find('>')? + start;
     let tail = msg[gt + 1..].trim_start();
@@ -464,7 +464,7 @@ pub(crate) fn shared_client() -> &'static reqwest::Client {
 /// Defense-in-depth hygiene — NBSP enters from PDF extraction, `\r` from Windows-edited
 /// text. Fast path returns `Cow::Borrowed` when no change needed.
 #[must_use]
-fn normalize_llm_text<'a>(input: &'a str) -> Cow<'a, str> {
+pub fn normalize_llm_text<'a>(input: &'a str) -> Cow<'a, str> {
     if !input.contains('\r') && !input.contains('\u{00A0}') {
         return Cow::Borrowed(input);
     }
@@ -484,7 +484,7 @@ fn normalize_llm_text<'a>(input: &'a str) -> Cow<'a, str> {
 /// succeeds on resubmit. Gated on the body string so real auth failures (wrong/
 /// revoked key, wrong org) fail fast.
 #[must_use]
-fn is_retryable_response(status: reqwest::StatusCode, body: &str) -> bool {
+pub fn is_retryable_response(status: reqwest::StatusCode, body: &str) -> bool {
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS
         || status == reqwest::StatusCode::REQUEST_TIMEOUT
         || status.is_server_error()
@@ -524,7 +524,7 @@ pub fn is_temperature_error(err_msg: &str) -> bool {
 }
 
 /// Exponential backoff: 1s, 2s, 4s (capped at 10s) + 0-500ms jitter.
-fn calculate_backoff(attempt: u32) -> u64 {
+pub fn calculate_backoff(attempt: u32) -> u64 {
     if let Some(ms) = test_backoff_override_ms() {
         return ms;
     }
@@ -559,7 +559,7 @@ fn test_backoff_override_ms() -> Option<u64> {
 /// Char-boundary-safe truncation (byte-slicing a multi-byte UTF-8 body panics;
 /// aifixes1 F6). Returns the leading `max_chars` characters.
 #[must_use]
-fn truncate_chars(text: &str, max_chars: usize) -> &str {
+pub fn truncate_chars(text: &str, max_chars: usize) -> &str {
     match text.char_indices().nth(max_chars) {
         Some((idx, _)) => &text[..idx],
         None => text,
@@ -578,7 +578,7 @@ fn parse_retry_after_ms(resp: &reqwest::Response) -> Option<u64> {
 
 /// Saturating seconds-to-milliseconds conversion (a hostile `Retry-After`
 /// near `u64::MAX` must not overflow; aifixes1 F6).
-fn retry_after_ms_from_secs(secs: u64) -> u64 {
+pub fn retry_after_ms_from_secs(secs: u64) -> u64 {
     secs.saturating_mul(1000).min(LLM_MAX_BACKOFF_MS)
 }
 
@@ -843,7 +843,7 @@ fn is_local_context_overflow(message: &str) -> bool {
 
 /// Map a Bango AI failure to an actionable message where possible; everything
 /// else passes through untouched (aifixes1 F3: no raw `400` for local overflow).
-fn map_bango_ai_error(err: AppError) -> AppError {
+pub fn map_bango_ai_error(err: AppError) -> AppError {
     let message = err.to_string();
     if is_local_context_overflow(&message) {
         return AppError::Import(
@@ -1365,238 +1365,4 @@ fn extract_content_from_response(value: &serde_json::Value) -> Option<String> {
 fn extract_total_tokens(value: &serde_json::Value) -> usize {
     // Standard OpenAI path
     value["usage"]["total_tokens"].as_u64().unwrap_or(0) as usize
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reqwest::StatusCode;
-
-    // ── aifixes1 F6: char-safe truncation + saturating Retry-After ─────
-
-    #[test]
-    fn truncate_chars_is_char_boundary_safe() {
-        let body = "中文错误".repeat(600);
-        let head = truncate_chars(&body, 500);
-        assert_eq!(head.chars().count(), 500, "exactly 500 chars");
-        assert!(body.starts_with(head), "prefix of the original body");
-        assert_eq!(truncate_chars("short", 500), "short");
-        assert_eq!(truncate_chars("", 500), "");
-    }
-
-    #[test]
-    fn retry_after_saturates_instead_of_overflowing() {
-        assert_eq!(retry_after_ms_from_secs(u64::MAX), LLM_MAX_BACKOFF_MS);
-        assert_eq!(retry_after_ms_from_secs(2), 2_000);
-    }
-
-    // ── aifixes1 F3: local context-overflow mapping ────────────────────
-
-    #[test]
-    fn bango_ai_overflow_maps_to_actionable_error() {
-        let mapped = map_bango_ai_error(AppError::Import(
-            "LLM request failed (400 Bad Request): prompt too large - exceeds the available \
-             context size (n_ctx)"
-                .to_string(),
-        ));
-        let text = mapped.to_string();
-        assert!(text.contains("Reduce the Context setting"), "got: {text}");
-
-        // Unrelated 400s pass through unchanged.
-        let untouched = map_bango_ai_error(AppError::Import(
-            "LLM request failed (400): invalid model".to_string(),
-        ));
-        assert!(untouched.to_string().contains("invalid model"));
-    }
-
-    // ── normalize_llm_text ───────────────────────────────────────────
-
-    #[test]
-    fn normalize_llm_text_identity_fast_path_returns_borrowed() {
-        // Clean input must return Cow::Borrowed (no allocation).
-        match normalize_llm_text("clean ascii text with\nnewlines and\ttabs") {
-            Cow::Borrowed(s) => assert_eq!(s, "clean ascii text with\nnewlines and\ttabs"),
-            Cow::Owned(_) => panic!("expected Cow::Borrowed for clean input"),
-        }
-    }
-
-    #[test]
-    fn normalize_llm_text_strips_carriage_returns() {
-        // `.as_ref()` compares the deref'd &str value, sidestepping the Cow
-        // type-parameter inference that constructing Cow::Owned on the RHS triggers.
-        assert_eq!(normalize_llm_text("line1\r\nline2\rmore").as_ref(), "line1\nline2more");
-        // Lone \r also dropped.
-        assert_eq!(normalize_llm_text("a\rb").as_ref(), "ab");
-    }
-
-    #[test]
-    fn normalize_llm_text_coerces_nbsp_to_ascii_space() {
-        let input = "word\u{00A0}word";
-        assert_eq!(normalize_llm_text(input).as_ref(), "word word");
-    }
-
-    #[test]
-    fn normalize_llm_text_handles_mixed_crlf_and_nbsp() {
-        let input = "title\r\nbody\u{00A0}with nbsp\r";
-        assert_eq!(normalize_llm_text(input).as_ref(), "title\nbody with nbsp");
-    }
-
-    #[test]
-    fn normalize_llm_text_preserves_unicode() {
-        // Non-NBSP unicode (CJK, accented) passes through unchanged.
-        let input = "日本語 résumé café";
-        match normalize_llm_text(input) {
-            Cow::Borrowed(s) => assert_eq!(s, "日本語 résumé café"),
-            Cow::Owned(_) => panic!("expected borrowed for non-NBSP unicode"),
-        }
-    }
-
-    // ── is_retryable_response ────────────────────────────────────────
-
-    #[test]
-    fn is_retryable_classic_transient_statuses_retry() {
-        assert!(is_retryable_response(StatusCode::TOO_MANY_REQUESTS, ""));
-        assert!(is_retryable_response(StatusCode::REQUEST_TIMEOUT, ""));
-        assert!(is_retryable_response(StatusCode::INTERNAL_SERVER_ERROR, ""));
-        assert!(is_retryable_response(StatusCode::BAD_GATEWAY, ""));
-        assert!(is_retryable_response(StatusCode::SERVICE_UNAVAILABLE, ""));
-        assert!(is_retryable_response(StatusCode::GATEWAY_TIMEOUT, ""));
-    }
-
-    #[test]
-    fn is_retryable_permanent_client_errors_do_not_retry() {
-        assert!(!is_retryable_response(StatusCode::BAD_REQUEST, "malformed json"));
-        assert!(!is_retryable_response(StatusCode::NOT_FOUND, "model not found"));
-        // Plain 401/403 without the specific transient body must NOT retry
-        // (these are real auth failures: wrong/revoked key, wrong org).
-        assert!(!is_retryable_response(StatusCode::UNAUTHORIZED, "Incorrect API key provided"));
-        assert!(!is_retryable_response(StatusCode::FORBIDDEN, "access denied"));
-    }
-
-    #[test]
-    fn is_retryable_insufficient_permissions_body_retries_on_401_and_403() {
-        let body = r#"{"error":{"message":"You have insufficient permissions for this operation.","type":"invalid_request_error","param":null,"code":null}}"#;
-        assert!(is_retryable_response(StatusCode::UNAUTHORIZED, body));
-        assert!(is_retryable_response(StatusCode::FORBIDDEN, body));
-    }
-
-    #[test]
-    fn is_retryable_insufficient_permissions_requires_both_status_and_body() {
-        // The body alone does not make a 400 retryable.
-        let body = "insufficient permissions for this operation";
-        assert!(!is_retryable_response(StatusCode::BAD_REQUEST, body));
-        // A similar but non-matching body on 403 does not retry.
-        assert!(!is_retryable_response(StatusCode::FORBIDDEN, "insufficient permission"));
-    }
-
-    // ── calculate_backoff ────────────────────────────────────────────
-
-    #[test]
-    fn calculate_backoff_stays_within_jitter_band() {
-        for attempt in 0..LLM_MAX_RETRIES {
-            let base = (LLM_INITIAL_BACKOFF_MS * (1u64 << attempt)).min(LLM_MAX_BACKOFF_MS);
-            for _ in 0..50 {
-                let backoff = calculate_backoff(attempt);
-                assert!(
-                    (base..=base + 500).contains(&backoff),
-                    "attempt {attempt}: backoff {backoff} outside [{base}, {}]",
-                    base + 500
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn calculate_backoff_caps_at_max_backoff() {
-        // Large attempt must still be capped at LLM_MAX_BACKOFF_MS + jitter.
-        let backoff = calculate_backoff(20);
-        assert!((LLM_MAX_BACKOFF_MS..=LLM_MAX_BACKOFF_MS + 500).contains(&backoff));
-    }
-
-    // ── is_temperature_error ─────────────────────────────────────────
-
-    // ── is_over_cap_error / parse_model_cap ─────────────────────────
-
-    #[test]
-    fn is_over_cap_error_matches_production_body() {
-        // The exact body shape from the Anthropic API (claude-3-era cap).
-        let msg = r#"LLM request failed (400 Bad Request): {"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: 20000 > 4096, which is the maximum allowed number of output tokens for claude-3-opus-20240229"}}"#;
-        assert!(is_over_cap_error(msg));
-    }
-
-    #[test]
-    fn is_over_cap_error_rejects_unrelated_bodies() {
-        assert!(!is_over_cap_error(
-            "LLM request failed (400 Bad Request): temperature does not support 0.2 with this model."
-        ));
-        assert!(!is_over_cap_error("LLM request failed (401 Unauthorized): Incorrect API key"));
-        // Mentions max_tokens but not the marker sentence.
-        assert!(!is_over_cap_error(
-            "LLM request failed (400 Bad Request): max_tokens: field required"
-        ));
-    }
-
-    #[test]
-    fn parse_model_cap_extracts_reported_limit() {
-        let msg = r#"max_tokens: 32768 > 4096, which is the maximum allowed number of output tokens for claude-3-opus-20240229"#;
-        assert_eq!(parse_model_cap(msg), Some(4096));
-        let msg_8k = "max_tokens: 32768 > 8192, which is the maximum allowed number of output tokens for claude-3-5-sonnet";
-        assert_eq!(parse_model_cap(msg_8k), Some(8192));
-    }
-
-    #[test]
-    fn parse_model_cap_returns_none_when_unparseable() {
-        // Marker sentence present but no `> N` comparison (reworded proxy error).
-        assert_eq!(
-            parse_model_cap("max_tokens: value above the limit, which is the maximum allowed number of output tokens"),
-            None
-        );
-        // No max_tokens mention at all.
-        assert_eq!(parse_model_cap("temperature does not support 0.2"), None);
-    }
-
-    #[test]
-    fn is_temperature_error_matches_openai_unsupported_value_body() {
-        // The exact body from the bug report.
-        let msg = "LLM request failed (400 Bad Request): {\"error\":{\"message\":\
-                   \"Unsupported value: 'temperature' does not support 0.2 with this model. \
-                   Only the default (1) value is supported.\",\"type\":\"invalid_request_error\",\
-                   \"param\":\"temperature\",\"code\":\"unsupported_value\"}}";
-        assert!(is_temperature_error(msg));
-    }
-
-    #[test]
-    fn is_temperature_error_matches_google_does_not_support_body() {
-        let msg = "LLM request failed (400 Bad Request): temperature does not support 0.2 with \
-                   this model. Only the default is supported.";
-        assert!(is_temperature_error(msg));
-    }
-
-    #[test]
-    fn is_temperature_error_matches_not_supported_phrasing() {
-        assert!(is_temperature_error("Invalid temperature: not supported by this model"));
-        assert!(is_temperature_error("temperature not supported"));
-    }
-
-    #[test]
-    fn is_temperature_error_rejects_non_temperature_errors() {
-        // No `temperature` token => never a temperature error.
-        assert!(!is_temperature_error("Invalid model"));
-        assert!(!is_temperature_error("max_tokens is not supported"));
-        assert!(!is_temperature_error("model not found"));
-        assert!(!is_temperature_error(""));
-    }
-
-    #[test]
-    fn is_temperature_error_rejects_temperature_without_unsupported_marker() {
-        // Mentions temperature but not as an unsupported-value error.
-        assert!(!is_temperature_error("temperature set to 0.2"));
-        assert!(!is_temperature_error("warning: temperature is low"));
-        // Out-of-range / invalid-value errors must NOT trigger retry-without-
-        // temperature: doing so would mask a genuine parameter error. These
-        // are distinct from "unsupported feature" errors (which the helper
-        // does match).
-        assert!(!is_temperature_error("temperature parameter is invalid"));
-        assert!(!is_temperature_error("Invalid temperature value"));
-    }
 }

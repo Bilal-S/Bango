@@ -27,8 +27,6 @@ pub mod trends;
 pub mod wiki_cmd;
 pub mod zotero;
 
-use crate::db::connection::DbState;
-use crate::error::AppError;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -36,13 +34,4 @@ use serde::Serialize;
 pub struct HealthCheck {
     pub status: String,
     pub article_count: usize,
-}
-
-#[tauri::command]
-pub fn health_check(db_state: tauri::State<'_, DbState>) -> Result<HealthCheck, AppError> {
-    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    let count: usize = conn
-        .query_row("SELECT COUNT(*) FROM articles", [], |row| row.get::<_, i64>(0))
-        .unwrap_or(0) as usize;
-    Ok(HealthCheck { status: "ok".to_string(), article_count: count })
 }

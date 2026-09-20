@@ -47,20 +47,6 @@ pub fn filter_valid_statuses(input: &[String]) -> Vec<String> {
     }
     out
 }
-
-/// The user's input to [`find_citations`].
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct CitationFinderInput {
-    pub text: String,
-    pub mode: CitationFinderMode,
-    /// Status strings for the candidate pool (e.g. `["working", "included"]`).
-    /// Filtered through [`filter_valid_statuses`] at the command boundary;
-    /// an empty result after filtering → "No articles match the selected
-    /// filters." empty result — the backend never applies a default.
-    pub status_filter: Vec<String>,
-}
-
 /// LLM processing mode for the pasted text.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

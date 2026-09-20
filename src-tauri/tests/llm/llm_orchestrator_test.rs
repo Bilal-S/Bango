@@ -267,25 +267,6 @@ async fn mixed_request_types_no_recursion() {
         assert!(result.is_ok(), "All request types should complete without recursion");
     }
 }
-
-// ─── send_unthrottled ───────────────────────────────────────────────
-
-#[tokio::test]
-async fn send_unthrottled_does_not_consume_semaphore() {
-    let orch = LlmOrchestrator::new(1, 0);
-    assert_eq!(orch.available_permits(), 1);
-}
-
-#[tokio::test]
-#[ignore = "slow"]
-async fn send_unthrottled_fails_on_unreachable() {
-    let orch = LlmOrchestrator::new(1, 0);
-    let config = fake_config();
-
-    let result = orch.send_unthrottled(&config, "sys", "usr", LlmRequestType::TestConnection).await;
-    assert!(result.is_err());
-}
-
 // ─── update_settings_during_active_requests ─────────────────────────
 
 #[tokio::test]
@@ -770,53 +751,6 @@ async fn concurrency_with_rate_limit_adds_delay_between_batches() {
 
     mock.assert_async().await;
 }
-
-#[tokio::test]
-async fn concurrent_send_unthrottled_bypasses_semaphore() {
-    let mut server = mockito::Server::new_async().await;
-    let mock = server
-        .mock("POST", "/chat/completions")
-        .match_header("authorization", "Bearer test-key")
-        .with_status(200)
-        .with_chunked_body(|w| {
-            std::thread::sleep(Duration::from_millis(100));
-            w.write_all(openai_chat_response("ok", 5).as_bytes()).unwrap();
-            Ok(())
-        })
-        .expect(3)
-        .create_async()
-        .await;
-
-    let orch = Arc::new(LlmOrchestrator::new(1, 0)); // max 1 concurrent
-    let config = mock_openai_config(&server.url());
-
-    let start = Instant::now();
-    let mut handles = vec![];
-    for _ in 0..3 {
-        let orch = orch.clone();
-        let config = config.clone();
-        handles.push(tokio::spawn(async move {
-            orch.send_unthrottled(&config, "sys", "usr", LlmRequestType::TestConnection).await
-        }));
-    }
-    for h in handles {
-        let r = tokio::time::timeout(Duration::from_secs(10), h).await;
-        assert!(r.is_ok());
-        assert!(r.unwrap().is_ok());
-    }
-    let elapsed = start.elapsed();
-
-    // send_unthrottled bypasses semaphore (limit=1), so all 3 run concurrently
-    // With 100ms delay each, total should be ~100-200ms, NOT 300ms+
-    assert!(
-        elapsed < Duration::from_millis(350),
-        "send_unthrottled should bypass semaphore, got {:?}",
-        elapsed
-    );
-
-    mock.assert_async().await;
-}
-
 // ═══════════════════════════════════════════════════════════════════════
 // Queue length tests (available permits tracking)
 // ═══════════════════════════════════════════════════════════════════════
@@ -916,54 +850,6 @@ async fn queue_length_returns_to_max_after_completion() {
 
     mock.assert_async().await;
 }
-
-#[tokio::test]
-async fn queue_length_unchanged_by_send_unthrottled() {
-    let mut server = mockito::Server::new_async().await;
-    let mock = server
-        .mock("POST", "/chat/completions")
-        .match_header("authorization", "Bearer test-key")
-        .with_status(200)
-        .with_chunked_body(|w| {
-            std::thread::sleep(Duration::from_millis(200));
-            w.write_all(openai_chat_response("ok", 5).as_bytes()).unwrap();
-            Ok(())
-        })
-        .expect(1)
-        .create_async()
-        .await;
-
-    let orch = Arc::new(LlmOrchestrator::new(3, 0));
-    let config = mock_openai_config(&server.url());
-
-    assert_eq!(orch.available_permits(), 3);
-
-    // Start an unthrottled request
-    let orch_clone = orch.clone();
-    let config_clone = config.clone();
-    let handle = tokio::spawn(async move {
-        orch_clone
-            .send_unthrottled(&config_clone, "sys", "usr", LlmRequestType::TestConnection)
-            .await
-    });
-
-    // Wait a bit for the request to start
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    // Permits should NOT have changed
-    assert_eq!(
-        orch.available_permits(),
-        3,
-        "send_unthrottled should not consume semaphore permits"
-    );
-
-    let r = tokio::time::timeout(Duration::from_secs(5), handle).await;
-    assert!(r.is_ok());
-    assert!(r.unwrap().is_ok());
-
-    mock.assert_async().await;
-}
-
 #[tokio::test]
 async fn queue_length_grows_after_update_settings() {
     let orch = LlmOrchestrator::new(3, 0);

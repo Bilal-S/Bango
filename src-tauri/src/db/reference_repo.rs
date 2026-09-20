@@ -344,57 +344,6 @@ pub fn create_link(
 
     get_link(conn, parent_article_id, reference_paper_id, ref_type)
 }
-
-/// Batch-create links for a parent article with multiple reference papers.
-pub fn create_links_batch(
-    conn: &Connection,
-    parent_article_id: &str,
-    paper_ids: &[(String, ReferenceType)],
-) -> Result<Vec<ArticleReferenceLink>, AppError> {
-    if paper_ids.is_empty() {
-        return Ok(vec![]);
-    }
-
-    let tx = conn.unchecked_transaction()?;
-    let mut links = Vec::with_capacity(paper_ids.len());
-
-    for (paper_id, ref_type) in paper_ids {
-        let id = Uuid::new_v4().to_string();
-        tx.execute(
-            "INSERT INTO article_reference_links (id, parent_article_id, reference_paper_id, type)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(parent_article_id, reference_paper_id, type) DO NOTHING",
-            params![id, parent_article_id, paper_id, ref_type.as_int()],
-        )?;
-
-        if tx.changes() > 0 {
-            let column = match ref_type {
-                ReferenceType::Citation => "citation_count",
-                ReferenceType::Reference => "reference_count",
-            };
-            let sql = format!(
-                "UPDATE reference_papers SET {} = {} + 1, updated_at = datetime('now') WHERE id = ?1",
-                column, column
-            );
-            tx.execute(&sql, [paper_id])?;
-        }
-
-        if let Ok(link) = tx.query_row(
-            "SELECT * FROM article_reference_links WHERE parent_article_id = ?1 AND reference_paper_id = ?2 AND type = ?3",
-            params![parent_article_id, paper_id, ref_type.as_int()],
-            row_to_link,
-        ) {
-            links.push(link);
-        }
-    }
-
-    // Update parent article flags
-    update_parent_flags_tx(&tx, parent_article_id)?;
-
-    tx.commit()?;
-    Ok(links)
-}
-
 /// Get a specific link.
 fn get_link(
     conn: &Connection,
@@ -701,35 +650,6 @@ fn update_parent_flags(conn: &Connection, parent_article_id: &str) -> Result<(),
     )?;
     Ok(())
 }
-
-fn update_parent_flags_tx(
-    tx: &rusqlite::Transaction<'_>,
-    parent_article_id: &str,
-) -> Result<(), AppError> {
-    let citation_count: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM article_reference_links WHERE parent_article_id = ?1 AND type = 0",
-        params![parent_article_id],
-        |row| row.get(0),
-    )?;
-    let reference_count: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM article_reference_links WHERE parent_article_id = ?1 AND type = 1",
-        params![parent_article_id],
-        |row| row.get(0),
-    )?;
-
-    tx.execute(
-        "UPDATE articles SET has_citation_details = ?1, has_reference_details = ?2, num_cited = ?3, num_references = ?4, changed_at = datetime('now') WHERE id = ?5",
-        params![
-            (citation_count > 0) as i32,
-            (reference_count > 0) as i32,
-            citation_count as i32,
-            reference_count as i32,
-            parent_article_id,
-        ],
-    )?;
-    Ok(())
-}
-
 // ─── References Tab queries ────────────────────────────────────
 
 /// Search reference papers with pagination. Searches title, authors, abstract_text,

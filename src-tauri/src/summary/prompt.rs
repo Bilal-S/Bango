@@ -64,12 +64,7 @@ pub const ARTICLE_SUMMARY_MARKDOWN_FALLBACK_PROMPT: &str =
     include_str!("ai_article_summary_markdown_fallback_prompt.md");
 
 use crate::error::AppError;
-/* `strip_code_fences`, `escape_control_chars_in_json`, and `prepare_llm_json` live in
-`utils::json_repair` so the orchestrator's `send_json` can use them without a
-summary-module dependency. Re-exported here for backward compat. */
-pub use crate::utils::json_repair::{
-    escape_control_chars_in_json, prepare_llm_json, strip_code_fences,
-};
+use crate::utils::json_repair::prepare_llm_json;
 
 /// LLM-described figure/table caption (Tier 2 Phase 4). Stored in `full_text_ai_summary`.
 /// `caption` = verbatim extracted text; `description` = grounded LLM summary.
@@ -84,25 +79,6 @@ pub struct FigureDescription {
     #[serde(default)]
     pub description: String,
 }
-
-/// LLM-described table with optional GFM `markdown` column (Tier 4.2/4.3).
-/// Stored in `full_text_ai_summary` under `tables`. `markdown` carries preserved GFM rows
-/// from `detect_markdown_tables` (T2.2) for native rendering. Old blobs render text-only.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TableDescription {
-    /// Table number, e.g. "1", "2a".
-    pub number: String,
-    /// Verbatim extracted caption text.
-    #[serde(default)]
-    pub caption: String,
-    /// GFM markdown rows from full text (T2.2). Empty when no match.
-    #[serde(default)]
-    pub markdown: String,
-    /// The grounded LLM summary of what the caption states.
-    #[serde(default)]
-    pub description: String,
-}
-
 /// Render user prompt for batched figure/table description. One numbered block per caption.
 /// Pure, no I/O.
 #[must_use]
@@ -217,77 +193,6 @@ pub fn merge_summary_into_blob(
     }
     merged.to_string()
 }
-
-/// Tier 4.2: Build the synthesis user prompt that asks the LLM to synthesize a
-/// unified 150-250 word digest FROM the per-section summaries (so the digest is
-/// consistent with, not contradictory to, the section data).
-///
-/// The prompt receives the paper title + field + the per-section summaries as
-/// input context, and asks for a single `summary_150_250_words` digest plus
-/// `key_insights` + `keywords` that incorporate the specific facts from the
-/// sections. Pure function: no I/O.
-#[must_use]
-pub fn build_synthesis_prompt(title: &str, field: &str, section_summaries_json: &str) -> String {
-    format!(
-        "## Paper Title\n{title}\n\n## Field\n{field}\n\n\
-         ## Per-Section Summaries (synthesize the digest FROM these)\n\
-         {section_summaries_json}\n\n\
-         Synthesize a unified 150-250 word digest (`summary_150_250_words`) that \
-         incorporates the specific facts from the sections above. Also return \
-         `key_insights` (3-5 bullets) and `keywords` (5-10 terms) consistent with \
-         the section data. Return ONLY a JSON object with keys: \
-         `summary_150_250_words`, `key_insights`, `keywords`."
-    )
-}
-
-/// Tier 4.2: Merge section summaries, figure/table descriptions, and synthesis digest
-/// into one unified blob. Single-write composition — no intermediate state.
-/// Stamps `schema_version: 2`. Returns serialized JSON.
-#[must_use]
-pub fn merge_unified_blob(
-    existing_blob: Option<&str>,
-    section_summaries_json: &str,
-    figures: Vec<FigureDescription>,
-    tables: Vec<TableDescription>,
-    synthesis_digest_json: &str,
-) -> String {
-    // Start from the existing blob (preserves unknown keys like `structured_extraction`).
-    let mut value: serde_json::Value = existing_blob
-        .and_then(|raw| serde_json::from_str(raw).ok())
-        .filter(serde_json::Value::is_object)
-        .unwrap_or_else(|| serde_json::json!({}));
-
-    // Overlay the section_summaries array (parse the JSON string; on malformed
-    // input, skip the key rather than panicking).
-    if let Ok(arr) = serde_json::from_str::<serde_json::Value>(section_summaries_json) {
-        if let Some(obj) = value.as_object_mut() {
-            obj.insert("section_summaries".to_string(), arr);
-        }
-    }
-
-    // Overlay figures + tables.
-    if let Some(obj) = value.as_object_mut() {
-        obj.insert("figures".to_string(), serde_json::to_value(&figures).unwrap_or_default());
-        obj.insert("tables".to_string(), serde_json::to_value(&tables).unwrap_or_default());
-    }
-
-    // Overlay the synthesis digest keys (summary_150_250_words, key_insights, keywords).
-    if let Ok(digest) = serde_json::from_str::<serde_json::Value>(synthesis_digest_json) {
-        if let (Some(obj), Some(digest_obj)) = (value.as_object_mut(), digest.as_object()) {
-            for (k, v) in digest_obj {
-                obj.insert(k.clone(), v.clone());
-            }
-        }
-    }
-
-    // Stamp schema_version: 2.
-    if let Some(obj) = value.as_object_mut() {
-        obj.insert("schema_version".to_string(), serde_json::Value::from(2));
-    }
-
-    value.to_string()
-}
-
 /// Tier 1 fallback: Parse markdown summary into JSON blob. For models that struggle with
 /// JSON schemas. Expected format: `## Field`, `## Summary`, `## Key Insights` (bullets),
 /// `## Keywords`, `## Structured Extraction` (`key: value`). Unknown headings ignored;

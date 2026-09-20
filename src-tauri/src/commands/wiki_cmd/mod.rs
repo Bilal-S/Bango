@@ -135,7 +135,7 @@ impl WikiIngestState {
     /// (the frontend's Stop button is the authoritative signal), so we recover
     /// rather than propagate. Mirrors `ScrapingState::lock_active`.
     fn lock_active(&self) -> std::sync::MutexGuard<'_, Option<Arc<AtomicBool>>> {
-        self.active.lock().unwrap_or_else(|e| e.into_inner())
+        crate::db::connection::lock_state_or_recover(&self.active)
     }
 
     /// Install `token` as the active ingest token. Returns the previously

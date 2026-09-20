@@ -237,7 +237,6 @@ describe('useDedup', () => {
 
       expect(tauriCommand).toHaveBeenCalledWith('resolve_fuzzy_match', {
         request: {
-          pairIndex: 0,
           resolution: 'keepA',
           articleAId: pair2.articleAId,
           articleBId: pair2.articleBId,

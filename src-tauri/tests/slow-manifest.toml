@@ -25,7 +25,6 @@ tests = [
     "llm_orchestrator_test::concurrent_sends_with_delay_do_not_deadlock",
     "llm_orchestrator_test::many_concurrent_sends_at_high_concurrency",
     "llm_orchestrator_test::mixed_request_types_no_recursion",
-    "llm_orchestrator_test::send_unthrottled_fails_on_unreachable",
     "llm_orchestrator_test::update_settings_during_active_requests_no_deadlock",
     "llm_client_test::test_openai_rate_limit_429",
     "llm_client_test::test_openai_server_error_500",

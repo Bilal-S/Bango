@@ -30,7 +30,9 @@
 ## Rust (src-tauri/)
 
 ### Error Handling
-- Use `anyhow::Result` for application-level errors (Tauri commands, CLI).
+- All application-level errors (Tauri commands, CLI, engines) return
+  `Result<T, AppError>` (thiserror); `AppError` implements `Serialize` for IPC.
+  Do not introduce `anyhow` - `thiserror` is the single error strategy.
 - Use `thiserror` for library-level errors (RIS parsing, deduplication, LLM client).
 - Never use `unwrap()` or `expect()` outside of tests. Clippy warns on both.
 - `unwrap()` / `expect()` / `panic!()` are allowed in test code (both inline
@@ -48,6 +50,11 @@
 - **System/Generic Error Logging**: For system-wide operational events or errors not tied to a specific article (e.g., scraping outcomes, global LLM client failures, database initialization errors), use `audit_repo::log_error(conn, details)`. This creates an audit entry with `article_id = NULL` and `action = 'error'`. Do not use this for article-specific events.
 - `Mutex::lock()` poison failures MUST be mapped to `AppError::LockPoisoned` via the shared `db::connection::lock_conn` helper. Never wrap a `PoisonError` as `AppError::Database` - a poisoned mutex is an application-state error, not a SQL error. Every command handler and engine that locks `DbState.conn` routes through `lock_conn(&db_state.conn)` (or `lock_conn(conn_mutex)` for engines taking `&Mutex<Connection>`) instead of inlining `.lock().map_err(...)`.
   Managed-state mutexes that do not hold a `Connection` (batch-import progress, chunk-rebuild progress) MUST use the generic sibling `db::connection::lock_state(&mutex)` - same `LockPoisoned` mapping. Cancel flags use lock-free `Arc<AtomicBool>` (no poison path; checks cannot be skipped on contention), never `Mutex<bool>`.
+  The ONE intentional-recovery escape hatch is `db::connection::lock_state_or_recover(&mutex)`
+  (poison -> `into_inner()`); reserved for best-effort state slots (scrape /
+  wiki-ingest cancel tokens, startup schema snapshot) where a panic under the
+  lock must not wedge the feature - every call site documents why recovery is
+  correct, and poison is never silently swallowed elsewhere (log it).
 
 ### Code Style
 - Module structure: one module per domain concern (e.g., `ris`, `dedup`, `screening`, `llm`, `db`, `prisma`, `biblio`).
@@ -136,7 +143,10 @@ bundled as `src-tauri/resources/journal_index.db` with the Tauri app.
 ### Startup Behavior (`lib.rs`)
 1. Migrations run → `journal_index` table created (v001).
 2. `load_journal_index_if_empty()` checks if the table has data.
-3. If empty, ATTACHes the bundled `journal_index.db` and bulk-copies all records.
+3. If empty, `load_journal_index_from_path` bulk-copies the bundled portal DB
+   rows using a SEPARATE `SQLITE_OPEN_READ_ONLY` source connection inside the
+   target's `unchecked_transaction` - NOT `ATTACH DATABASE` (ATTACH fails on
+   Windows when the bundled source is WAL-mode; see `src-tauri/src/AGENTS.md`).
 
 ### How to Update Journal Data for a New Release
 1. Place updated CSV files in `~/Documents/Journals/` (or a specified directory).

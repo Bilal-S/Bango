@@ -457,50 +457,6 @@ pub fn set_openalex_settings(
     }
     Ok(())
 }
-
-/// Download a PDF from an OpenAlex OA URL and attach as full text for the
-/// given article. Gracefully handles CAPTCHA/paywall pages.
-#[tauri::command]
-pub async fn download_and_attach_openalex_pdf(
-    db_state: State<'_, DbState>,
-    article_id: String,
-    pdf_url: String,
-) -> Result<bool, AppError> {
-    // 1. Download the PDF bytes (async, no DB lock).
-    let pdf_bytes = openalex::client::download_pdf(&pdf_url).await?;
-
-    // 2. Write to a temp file, then use the existing attach_full_text_inner.
-    let temp_dir = std::env::temp_dir();
-    let temp_file = temp_dir.join(format!("openalex_{article_id}.pdf"));
-    std::fs::write(&temp_file, &pdf_bytes)
-        .map_err(|e| AppError::Import(format!("Failed to write temp PDF: {e}")))?;
-
-    // 3. Attach via the existing pipeline (extract text, copy to fulltext/, chunk).
-    let attach_result = {
-        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        let storage_dir = crate::commands::full_text::compute_storage_dir(&conn)?;
-        // Read the article's DOI so the destination filename uses the
-        // DOI-aware naming convention (Concern 2). The article row is loaded
-        // here under the same lock as the storage dir resolution.
-        let article = article_repo::get_article_by_id(&conn, &article_id)?;
-        crate::commands::full_text::attach_full_text_inner(
-            &conn,
-            &article_id,
-            article.doi.as_deref(),
-            &temp_file,
-            &storage_dir,
-        )
-    };
-
-    // 4. Clean up the temp file (best-effort).
-    let _ = std::fs::remove_file(&temp_file);
-
-    match attach_result {
-        Ok(_) => Ok(true),
-        Err(e) => Err(AppError::Import(format!("PDF downloaded but text extraction failed: {e}"))),
-    }
-}
-
 // ── Smart Search command ───────────────────────────────────────────────────
 
 /// Generate an OpenAlex Boolean query from research aims + criteria via the LLM.

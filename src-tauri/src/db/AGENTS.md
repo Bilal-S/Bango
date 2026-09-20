@@ -296,8 +296,8 @@ the wrong journal among similar names. `search_journal_index` (+
 `JournalIndexMatch` struct) is the **interactive** counterpart for the
 article-metadata journal autocomplete: it DOES use LIKE substring (safe because
 the user reviews candidates), gated on a 4-char minimum. `articles.journal_index_id`
-is populated on import and refreshable via `rematch_journals`; intentionally NOT
-round-tripped through project backup/restore (re-derived on import). Tested in
+is populated on import; intentionally NOT round-tripped through project
+backup/restore (re-derived on import). Tested in
 `tests/db/journal_repo_test.rs` (31 tests).
 
 ### `chunk_repo.rs` - Tier 3 article chunk storage

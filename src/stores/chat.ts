@@ -87,10 +87,6 @@ export const useChatStore = defineStore('chat', () => {
   /** Wiki available for chat (initialized AND has pages). */
   const wikiReady = ref(false);
 
-  /** Citation finder toggle visibility. @deprecated Use `citationReadiness` +
-   *  `citationToggleState` instead. Kept for backward-compat. */
-  const citationFinderReady = ref(false);
-
   /** Full readiness payload (drives toggle state via `citationToggleState`).
    *  `null` until first IPC completes. Refreshed reactively on LLM config
    *  changes via view watcher. */
@@ -161,17 +157,9 @@ export const useChatStore = defineStore('chat', () => {
     wikiReady.value = ready;
   }
 
-  /** Update the citation-finder readiness flag (drives toggle visibility). */
-  function setCitationFinderReady(ready: boolean) {
-    citationFinderReady.value = ready;
-  }
-
-  /** Set full readiness payload. Also updates legacy `citationFinderReady` for backward-compat. */
+  /** Set full readiness payload (drives toggle state via `citationToggleState`). */
   function setCitationReadiness(r: CitationFinderReadiness | null) {
     citationReadiness.value = r;
-    // Mirror the derived bool so the welcome card's `citationFinderReady`
-    // branch keeps working without a separate watcher.
-    citationFinderReady.value = r ? r.providerSupportsEmbeddings : false;
   }
 
   /** Record that the user dismissed the model-mismatch dialog for the given
@@ -373,7 +361,6 @@ export const useChatStore = defineStore('chat', () => {
     inputDraft,
     citationDraft,
     wikiReady,
-    citationFinderReady,
     citationReadiness,
     mismatchDismissedFor,
     citationFinderMode,
@@ -388,7 +375,6 @@ export const useChatStore = defineStore('chat', () => {
     setSource,
     toggleWikiMode,
     setWikiReady,
-    setCitationFinderReady,
     setCitationReadiness,
     setMismatchDismissed,
     setCitationFinderMode,

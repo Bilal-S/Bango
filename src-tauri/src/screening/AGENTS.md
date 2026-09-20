@@ -316,8 +316,8 @@ labels (`"Inclusion: {text}"`) no longer leak the prefix into the stored name.
   worst_case_per_article_tokens` (pure, `#[must_use]`) computes the §4.3
   worst-case footprint per active mode (Abstract = abstract+template; Enhanced
   adds `chunk_budget/4`; Two-stage adds `chunk_budget/4 *
-  two_stage_expected_borderline_fraction`); both `get_screening_readiness` and
-  `estimate_screening_tokens` route through it so their estimates stay in sync.
+  two_stage_expected_borderline_fraction`); `get_screening_readiness` routes
+  through it so the estimate stays in sync with the active mode.
 
 ### Commands (`commands/screening.rs`)
 

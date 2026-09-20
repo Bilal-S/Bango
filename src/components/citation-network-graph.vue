@@ -215,7 +215,7 @@ watch(
  * computed node/edge sets change.
  */
 watch(
-  () => [props.showMainPath, props.mainPathNodes, props.mainPathEdges] as const,
+  [() => props.showMainPath, () => props.mainPathNodes, () => props.mainPathEdges],
   () => applyVisualState(),
   { deep: true }
 );

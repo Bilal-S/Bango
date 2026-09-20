@@ -42,6 +42,17 @@ pub fn lock_state<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, AppError> {
     mutex.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))
 }
 
+/// Lock a managed-state mutex, RECOVERING from poison by taking the inner
+/// guard (`into_inner`). Reserved for intentionally-best-effort state slots
+/// (scrape / wiki-ingest cancel tokens, the startup schema snapshot) where a
+/// panic under the lock must not wedge the feature: the shared slot stays
+/// readable/writable, which is preferable to propagating
+/// [`AppError::LockPoisoned`]. Every call site MUST document why recovery is
+/// the correct choice for that slot.
+pub fn lock_state_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 pub fn create_connection_at(path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(path)?;
     /* busy_timeout MUST be set before any multi-connection topology: without it,

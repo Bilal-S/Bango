@@ -109,9 +109,7 @@ impl LocalEngine {
             let started = Instant::now();
             eprintln!("[embedding] engine embed begin: {text_count} text(s), {before} in flight");
             let result = (|| -> Result<(Vec<Vec<f32>>, i32), AppError> {
-                let mut guard = session
-                    .lock()
-                    .map_err(|e| AppError::LockPoisoned(format!("local engine session: {e}")))?;
+                let mut guard = crate::db::connection::lock_state(&session)?;
                 if guard.is_none() {
                     let load_started = Instant::now();
                     eprintln!("[embedding] engine session load begin");
@@ -154,11 +152,7 @@ impl LocalEngine {
         let in_flight = self.embeds_in_flight.load(Ordering::SeqCst);
         let started = Instant::now();
         eprintln!("[embedding] engine reset begin: {in_flight} embed(s) in flight");
-        let session = self
-            .session
-            .lock()
-            .map_err(|e| AppError::LockPoisoned(format!("local engine session: {e}")))?
-            .take();
+        let session = crate::db::connection::lock_state(&self.session)?.take();
         eprintln!(
             "[embedding] engine reset locked after {} ms: session_present={}",
             started.elapsed().as_millis(),

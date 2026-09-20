@@ -123,9 +123,8 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
   DB lock before invoking `orchestrator.send` (spec §8.1 "lock-release-call-
   lock" worker pattern + the same discipline enforced across all command
   handlers). So the persister's lock acquisition cannot deadlock with a caller.
-- **`send_unthrottled` does NOT persist**: it is used only for legacy edge
-  cases and intentionally does not touch the temperature flag. `test_connection`
-  DOES participate: it returns `(String, usize, CallMeta)` and flips the
+- **`test_connection` owns its temperature persistence**: it returns
+  `(String, usize, CallMeta)` and flips the
   in-session latch on recovery, so `test_llm_connection` can detect the
   recovery (`Ok` + `temperature_was_rejected`) and persist
   `skip_temperature = true` to the DB. This closes the regression where the

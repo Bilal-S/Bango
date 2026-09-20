@@ -3,10 +3,9 @@ use crate::db::biblio_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
 use crate::models::biblio::{
-    AuthorDetail, AuthorProductivityKpis, AuthorRank, BiblioAuthor, BiblioInstitution, BiblioKpis,
-    BiblioStatus, BiblioTerm, YearCount,
+    AuthorDetail, AuthorProductivityKpis, AuthorRank, BiblioInstitution, BiblioKpis, BiblioStatus,
+    YearCount,
 };
-// BiblioTerm is re-exported through biblio_repo - no direct use here
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
@@ -90,31 +89,6 @@ pub async fn biblio_get_needs_refresh(
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     app_settings_repo::get_biblio_needs_refresh(&conn)
 }
-
-#[tauri::command]
-pub async fn biblio_get_status(
-    db_state: tauri::State<'_, DbState>,
-) -> Result<BiblioStatus, AppError> {
-    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    biblio_repo::get_biblio_status(&conn)
-}
-
-#[tauri::command]
-pub async fn biblio_get_authors(
-    db_state: tauri::State<'_, DbState>,
-) -> Result<Vec<BiblioAuthor>, AppError> {
-    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    biblio_repo::get_all_authors(&conn)
-}
-
-#[tauri::command]
-pub async fn biblio_get_terms(
-    db_state: tauri::State<'_, DbState>,
-) -> Result<Vec<BiblioTerm>, AppError> {
-    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    biblio_repo::get_all_terms(&conn)
-}
-
 #[tauri::command]
 pub async fn biblio_get_coauthor_network(
     db_state: tauri::State<'_, DbState>,
@@ -137,15 +111,6 @@ pub async fn biblio_get_author_institutions(
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     biblio_repo::get_institutions_by_author(&conn, &author_id)
 }
-
-#[tauri::command]
-pub async fn biblio_get_unmatched_affiliation_count(
-    db_state: tauri::State<'_, DbState>,
-) -> Result<i32, AppError> {
-    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    biblio_repo::count_unmatched_affiliations(&conn)
-}
-
 #[tauri::command]
 pub async fn biblio_get_author_pubs_by_year(
     db_state: tauri::State<'_, DbState>,

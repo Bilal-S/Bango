@@ -539,46 +539,6 @@ impl LlmOrchestrator {
 
         result
     }
-
-    /// Send without semaphore (used for test-connection feedback). Rate limiting still enforced.
-    /// Temperature-flag NOT persisted here; the sole caller (`test_llm_connection`) owns its own.
-    pub async fn send_unthrottled(
-        &self,
-        config: &LlmConfig,
-        system_prompt: &str,
-        user_prompt: &str,
-        request_type: LlmRequestType,
-    ) -> Result<(String, usize), AppError> {
-        // Only enforce rate limiting, no semaphore
-        self.enforce_rate_limit().await;
-
-        let timeout = timeout_for(&request_type);
-        let timeout_secs = timeout.as_secs();
-        let result = tokio::time::timeout(
-            timeout,
-            client::send_chat_completion(config, system_prompt, user_prompt),
-        )
-        .await
-        .map_err(|_| {
-            AppError::Import(format!(
-                "LLM request timed out after {timeout_secs} seconds. This is often caused by                  sustained rate limiting (429), server overload (5xx), or a slow model."
-            ))
-        })?;
-
-        // Unpack the 3-tuple; the unthrottled path intentionally does NOT
-        // persist the temperature flag - the sole unthrottled caller is
-        // `test_connection`, which is driven by `test_llm_connection` and that
-        // command already owns its own temperature-recovery + persistence
-        // (`commands/llm_config.rs`). Persisting here would double-handle.
-        let result = result.map(|(content, tokens, _meta)| (content, tokens));
-
-        if let Err(ref e) = result {
-            eprintln!("[LlmOrchestrator] {:?} request failed: {}", request_type, e);
-        }
-
-        result
-    }
-
     /// Enforce minimum delay between consecutive requests.
     async fn enforce_rate_limit(&self) {
         let delay_ms = *self.request_delay_ms.lock().await;

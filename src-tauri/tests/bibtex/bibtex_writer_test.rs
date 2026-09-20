@@ -201,6 +201,7 @@ fn empty_optional_fields_omitted() {
     assert!(bib.contains("@article{anonndonly,"));
 }
 
+#[test]
 fn citation_key_authorless_uses_anon_and_yearless_nd() {
     assert_eq!(make_citation_key(&make_article("Sugar Taxes", &[])), "anon2023sugar");
     let mut a = make_article("Sugar Taxes", &["Smith, John"]);

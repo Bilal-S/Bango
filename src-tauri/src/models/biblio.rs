@@ -35,16 +35,6 @@ pub struct BiblioInstitution {
     pub city: Option<String>,
     pub created_at: String,
 }
-
-/// Link between an author (per-article) and an institution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BiblioAuthorAffiliation {
-    pub id: String,
-    pub article_id: String,
-    pub author_id: String,
-    pub institution_id: String,
-}
-
 /// Term type: keyword from RIS/metadata or noun-phrase extracted by LLM.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -92,16 +82,6 @@ pub struct BiblioTerm {
     pub article_count: i32,
     pub created_at: String,
 }
-
-/// Link between an article and a term.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BiblioArticleTerm {
-    pub id: String,
-    pub article_id: String,
-    pub term_id: String,
-    pub frequency: i32,
-}
-
 /// Network type for bibliometric visualizations.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -162,7 +142,7 @@ pub struct BiblioNetworkEdge {
     pub weight: f64,
 }
 
-/// Status summary returned by `biblio_get_status`.
+/// Status summary for the bibliometric corpus (counts + staleness).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BiblioStatus {

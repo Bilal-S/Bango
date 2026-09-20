@@ -17,12 +17,6 @@ pub fn get_prisma_data(db_state: State<'_, DbState>) -> Result<PrismaData, AppEr
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     data::compute_prisma_data(&conn)
 }
-
-#[tauri::command]
-pub fn get_prisma_svg(db_state: State<'_, DbState>) -> Result<String, AppError> {
-    render_svg(&db_state)
-}
-
 #[tauri::command]
 pub fn export_prisma_svg_to_file(
     db_state: State<'_, DbState>,

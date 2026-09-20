@@ -249,11 +249,6 @@ pub fn set_screening_mode(conn: &Connection, mode: ScreeningMode) -> Result<(), 
 pub fn get_enhanced_top_k(conn: &Connection) -> Result<usize, AppError> {
     Ok(get_setting(conn, ENHANCED_TOP_K_KEY)?.and_then(|v| v.parse::<usize>().ok()).unwrap_or(2))
 }
-
-pub fn set_enhanced_top_k(conn: &Connection, value: usize) -> Result<(), AppError> {
-    set_setting(conn, ENHANCED_TOP_K_KEY, Some(&value.to_string()))
-}
-
 /// The sections eligible for enhanced-screening evidence chunks.
 /// Default `["Methods", "Results"]`. Discussion/Limitations excluded.
 pub fn get_enhanced_screening_sections(conn: &Connection) -> Result<Vec<String>, AppError> {
@@ -264,14 +259,6 @@ pub fn get_enhanced_screening_sections(conn: &Connection) -> Result<Vec<String>,
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| vec!["Methods".to_string(), "Results".to_string()]))
 }
-
-pub fn set_enhanced_screening_sections(
-    conn: &Connection,
-    sections: &[String],
-) -> Result<(), AppError> {
-    set_setting(conn, ENHANCED_SCREENING_SECTIONS_KEY, Some(&sections.join(",")))
-}
-
 /// The lower bound of the two-stage borderline band (inclusive). Default 0.4.
 pub fn get_two_stage_low(conn: &Connection) -> Result<f64, AppError> {
     Ok(get_setting(conn, TWO_STAGE_LOW_KEY)?
@@ -304,11 +291,6 @@ pub fn get_chunk_budget_per_article(conn: &Connection) -> Result<usize, AppError
         .filter(|v| *v > 0)
         .unwrap_or(2_400))
 }
-
-pub fn set_chunk_budget_per_article(conn: &Connection, value: usize) -> Result<(), AppError> {
-    set_setting(conn, CHUNK_BUDGET_PER_ARTICLE_KEY, Some(&value.to_string()))
-}
-
 /// Expected fraction of articles falling in the two-stage borderline band
 /// `[two_stage_low, two_stage_high)` that receive a second full-text pass.
 /// Used by §4.3 token-warning estimator. Default 0.15. Clamped to `[0.0, 1.0]`.
@@ -318,14 +300,6 @@ pub fn get_two_stage_expected_borderline_fraction(conn: &Connection) -> Result<f
         .filter(|v| (0.0..=1.0).contains(v))
         .unwrap_or(0.15))
 }
-
-pub fn set_two_stage_expected_borderline_fraction(
-    conn: &Connection,
-    value: f64,
-) -> Result<(), AppError> {
-    set_setting(conn, TWO_STAGE_EXPECTED_BORDERLINE_FRACTION_KEY, Some(&value.to_string()))
-}
-
 // ── Custom Screening Instructions ────────────────────────────────────────────
 
 /// `app_settings` key for optional custom screening-instructions text.

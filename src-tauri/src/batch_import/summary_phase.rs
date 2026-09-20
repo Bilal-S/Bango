@@ -145,7 +145,7 @@ where
 /// `false` when not, after writing a system-level audit record so the skip
 /// surfaces in Diagnostics. Mirrors Phase 3.
 pub fn llm_configured_with_audit(db_state: &State<'_, DbState>) -> bool {
-    let conn = match db_state.conn.lock() {
+    let conn = match crate::db::connection::lock_conn(&db_state.conn) {
         Ok(c) => c,
         Err(_) => return false, // lock-error surfaced by caller's skip message
     };

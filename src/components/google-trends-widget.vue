@@ -159,13 +159,13 @@ function handleMessage(event: MessageEvent) {
    (chart first, then map after ~2-4s); we keep a short internal debounce
    only to coalesce rapid prop changes. */
 watch(
-  () => [
-    props.type,
-    props.keywords,
-    props.range,
-    props.revision,
-    props.readyToRender,
-    props.rateLimited,
+  [
+    () => props.type,
+    () => props.keywords,
+    () => props.range,
+    () => props.revision,
+    () => props.readyToRender,
+    () => props.rateLimited,
   ],
   () => {
     if (timeoutId) clearTimeout(timeoutId);

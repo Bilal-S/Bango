@@ -41,13 +41,6 @@ pub struct LabelWithCount {
     pub color: Option<String>,
     pub article_count: usize,
 }
-
-#[tauri::command]
-pub fn get_labels(db_state: State<'_, DbState>) -> Result<Vec<Label>, AppError> {
-    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    label_repo::get_all_labels(&conn)
-}
-
 #[tauri::command]
 pub fn get_labels_with_counts(
     db_state: State<'_, DbState>,

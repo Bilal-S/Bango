@@ -309,7 +309,7 @@ pub async fn start_batch_import(
         // Read the auto_translate setting once (Phase 3 gate). Default false
         // (opt-in); Phase 3 is skipped unless the user enabled it in Settings.
         let auto_translate = {
-            let conn = match db.conn.lock() {
+            let conn = match crate::db::connection::lock_conn(&db.conn) {
                 Ok(c) => c,
                 Err(_) => {
                     emit_progress(
@@ -618,7 +618,7 @@ pub async fn start_batch_import(
         // ═══════════════════════════════════════════════════════════════════
         let sum_result = if auto_sum {
             let to_summarize: Vec<String> = {
-                let conn = match db.conn.lock() {
+                let conn = match crate::db::connection::lock_conn(&db.conn) {
                     Ok(c) => c,
                     Err(_) => {
                         return;

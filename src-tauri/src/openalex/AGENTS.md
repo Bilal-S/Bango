@@ -95,8 +95,7 @@ the backend cannot read localStorage; PDF download + attach + extraction errors
 are logged to the article's audit trail via `log_article_error` helper, NOT
 `log_error_best_effort` which writes `article_id = NULL` and hides them from
 the Audit Timeline), `check_dois_in_library`, `smart_search_openalex`,
-`get_openalex_settings` / `set_openalex_settings`,
-`download_and_attach_openalex_pdf`. Import reuses the existing
+`get_openalex_settings` / `set_openalex_settings`. Import reuses the existing
 `insert_articles_batch` -> `classify_imported_articles` ->
 `resolve_journal_links` pipeline (parity with RIS/BibTeX). No migration needed
 (`'import'` already in `audit_entries.action` CHECK).

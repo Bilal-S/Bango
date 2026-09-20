@@ -261,17 +261,9 @@ pub async fn merge_exact_duplicates(
     .await
     .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?
 }
-
-// Legacy command kept for backward compatibility - now just delegates to check_duplicates.
-#[tauri::command]
-pub async fn run_deduplication(app: AppHandle) -> Result<DedupResult, AppError> {
-    check_duplicates(app).await
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolveFuzzyRequest {
-    pub pair_index: usize,
     pub resolution: DedupResolution,
     pub article_a_id: String,
     pub article_b_id: String,

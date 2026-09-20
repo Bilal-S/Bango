@@ -1,9 +1,7 @@
 import { onScopeDispose, ref } from 'vue';
 import { listen } from '@tauri-apps/api/event';
 import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
-import { useLlmConfigStore } from '@/stores/llm-config';
-
-export type LlmBackendId = 'configured_provider' | 'bango_ai';
+import { useLlmConfigStore, type LlmBackendId } from '@/stores/llm-config';
 
 export interface BangoAiHardwareProfile {
   target: string | null;
@@ -48,13 +46,13 @@ export interface BangoAiStatus {
   backend: LlmBackendId;
 }
 
-export interface BangoAiSettings {
+interface BangoAiSettings {
   context: number;
   threads: number;
   reasoning: boolean;
 }
 
-export interface BangoAiProgress {
+interface BangoAiProgress {
   phase: string;
   file: string;
   fileBytes: number;
@@ -64,7 +62,7 @@ export interface BangoAiProgress {
   message?: string | null;
 }
 
-export interface BangoAiTestOutcome {
+interface BangoAiTestOutcome {
   modelLoadMs: number;
   responseMs: number;
   tokensPerSecond: number;
@@ -73,12 +71,12 @@ export interface BangoAiTestOutcome {
   detail: string;
 }
 
-export interface BangoAiVerifyOutcome {
+interface BangoAiVerifyOutcome {
   healthy: boolean;
   failures: { name: string; reason: string }[];
 }
 
-export interface BangoAiInstallOutcome {
+interface BangoAiInstallOutcome {
   state: string;
   runtimeBytes: number;
   modelBytes: number;

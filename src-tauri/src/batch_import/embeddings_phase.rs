@@ -53,7 +53,7 @@ pub async fn run_embeddings_phase(
 
     // Pre-flight: embeddings enabled?
     {
-        let conn = match db_state.conn.lock() {
+        let conn = match crate::db::connection::lock_conn(&db_state.conn) {
             Ok(c) => c,
             Err(_) => {
                 return BatchImportPhaseResult {
@@ -162,7 +162,7 @@ const LLM_NOT_CONFIGURED_SKIP_MSG: &str = "Skipped: LLM not configured";
 
 /// Pre-flight LLM config check for Phase 5. Mirrors Phase 3/4.
 pub fn llm_configured_with_audit(db_state: &State<'_, DbState>) -> bool {
-    let conn = match db_state.conn.lock() {
+    let conn = match crate::db::connection::lock_conn(&db_state.conn) {
         Ok(c) => c,
         Err(_) => return false,
     };

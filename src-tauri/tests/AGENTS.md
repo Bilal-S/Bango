@@ -82,7 +82,7 @@ plus the wikifix tests in `wiki/wiki_ingest_test.rs`,
 wiki output-budget plan (Changes 1-4 and 6 fully implemented: summary-blob
 export, ensure-summaries, 2M input ceiling, two-sided sizing, Existing Pages
 Index, oversize truncation, truncation detection + bounded continuation,
-coverage guard, run-over-run metrics; plan: `.worktrees/wikifix-final.md`);
+coverage guard, run-over-run metrics);
 binding inventory: `docs/test-plans/wiki-output-budget-tests.md`.
 `wiki/wiki_author_enrichment_test.rs` covers the bibliometric author-page
 enrichment (co-author regression, most-cited, key references, main themes,
@@ -121,6 +121,17 @@ mapping + DOI diff + preview counts), `zotero/zotero_write_client_test.rs`
 (envelope/authorize/upload parsing, write-error classification, batch
 tokens, stored-key reuse policy, mid-run key-expiry abort); binding
 inventory: `docs/test-plans/zotero-tests.md`.
+
+### Extracted inline unit-test blocks
+
+Large `#[cfg(test)] mod tests` blocks live in the matching area dir, not in
+`src/` (helpers tested externally are `pub`): `citation_finder_search_test.rs`
+(merge/pool/cosine helpers from `citation_finder/search.rs`),
+`llm_local_engine_test.rs` (engine lifecycle seams), `llm_client_test.rs`
+(client parse/retry helpers), `wiki_raw_export_test.rs`, `wiki_engine_test.rs`,
+`wiki_chat_test.rs`, `embedding_text_test.rs` (pure text helpers),
+`translation_engine_test.rs`, and the `rank_chunks_by_criteria` section of
+`chunk_retrieval_test.rs`. Extract more when a block grows past ~200 lines.
 
 ## Work Guidance
 

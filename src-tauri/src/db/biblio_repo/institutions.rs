@@ -77,19 +77,3 @@ pub fn get_institutions_by_author(
         .collect::<Result<Vec<_>, _>>()?;
     Ok(institutions)
 }
-
-/// Count article-author rows that have a raw_affiliation but no linked institution.
-/// These are candidates for LLM-based affiliation normalization.
-pub fn count_unmatched_affiliations(conn: &Connection) -> Result<i32, AppError> {
-    let count: i32 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM biblio_article_authors baa \
-             LEFT JOIN biblio_author_affiliations baf ON baf.article_id = baa.article_id AND baf.author_id = baa.author_id \
-             WHERE baa.raw_affiliation IS NOT NULL AND baa.raw_affiliation != '' \
-             AND baf.id IS NULL",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
-    Ok(count)
-}

@@ -184,7 +184,52 @@ fn check_dois_in_library_batch() {
 }
 
 #[test]
-#[ignore = "Tier 2: harvest_referenced_works_batch"]
 fn harvest_referenced_works_batch() {
-    // TODO: Tier 2 - test the reference-harvest batch-fetch pipeline.
+    use bango_lib::db::reference_repo;
+    use bango_lib::models::reference::ReferenceType;
+    use bango_lib::openalex::reference_harvest;
+
+    let conn = setup_db();
+
+    // Parent article in the library.
+    let work = make_test_work();
+    let new_article = mapping::map_work_to_new_article(&work);
+    let inserted = article_repo::insert_articles_batch(&conn, &[new_article], "openalex").unwrap();
+    let article_id = inserted[0].id.clone();
+
+    // Stand-ins for the batch `fetch_works_by_ids` result: two referenced
+    // works with distinct OpenAlex ids + DOIs (the HTTP fetch layer itself is
+    // covered by the client tests; this pins the fetch -> insert -> link
+    // pipeline the harvest loop drives).
+    let mut ref_a = make_test_work();
+    ref_a.id = "https://openalex.org/W111".to_string();
+    ref_a.doi = Some("https://doi.org/10.1000/ref-a".to_string());
+    ref_a.title = Some("Referenced Work A".to_string());
+    let mut ref_b = make_test_work();
+    ref_b.id = "https://openalex.org/W222".to_string();
+    ref_b.doi = Some("https://doi.org/10.1000/ref-b".to_string());
+    ref_b.title = Some("Referenced Work B".to_string());
+
+    let written = reference_harvest::persist_harvested_papers(
+        &conn,
+        &article_id,
+        &[ref_a, ref_b],
+        ReferenceType::Reference,
+    );
+    assert_eq!(written, 2, "both fetched works persist");
+
+    // Papers landed in reference_papers (DOI lookup is case-insensitive).
+    assert!(reference_repo::find_paper_by_doi(&conn, "10.1000/ref-a").unwrap().is_some());
+    assert!(reference_repo::find_paper_by_doi(&conn, "10.1000/ref-b").unwrap().is_some());
+
+    // Outgoing-reference links created for the parent article (type-filtered
+    // read-back returns exactly the two harvested papers).
+    let links = reference_repo::get_references_for_article(
+        &conn,
+        &article_id,
+        Some(&ReferenceType::Reference),
+    )
+    .unwrap();
+    assert_eq!(links.len(), 2, "both harvested papers linked to the parent");
+    assert!(links.iter().all(|l| l.reference_type == ReferenceType::Reference));
 }
