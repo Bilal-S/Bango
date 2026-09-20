@@ -171,6 +171,87 @@ describe('use-bango-ai', () => {
     });
   });
 
+  it('cancel_install_switches_to_configured_provider_and_suppresses_the_cancel_error', async () => {
+    currentBackend = 'bango_ai';
+    let rejectInstall!: (error: Error) => void;
+    mockInvoke.mockImplementation((command: string, args?: { backend?: string }) => {
+      if (command === 'install_bango_ai') {
+        return new Promise((_resolve, reject) => {
+          rejectInstall = reject;
+        });
+      }
+      if (command === 'set_llm_backend') {
+        currentBackend = args?.backend ?? currentBackend;
+        return Promise.resolve(undefined);
+      }
+      if (command === 'get_llm_backend') return Promise.resolve(currentBackend);
+      if (command === 'get_bango_ai_status')
+        return Promise.resolve({ ...STATUS, backend: currentBackend });
+      return Promise.resolve(commandResponse(command));
+    });
+
+    await runInScope(async () => {
+      const api = useBangoAi();
+      await api.load();
+      expect(api.backend.value).toBe('bango_ai');
+
+      const installPromise = api.install(true);
+      expect(api.installing.value).toBe(true);
+
+      await api.cancelInstall();
+
+      expect(mockInvoke).toHaveBeenCalledWith('cancel_bango_ai_install');
+      expect(api.installing.value).toBe(false);
+      expect(api.progress.value).toBeNull();
+      expect(api.backend.value).toBe('configured_provider');
+      expect(mockInvoke).toHaveBeenCalledWith('set_llm_backend', {
+        backend: 'configured_provider',
+      });
+
+      rejectInstall(new Error('Bango AI setup was cancelled. You can resume later.'));
+      await expect(installPromise).resolves.toBeNull();
+      expect(api.error.value).toBeNull();
+    });
+  });
+
+  it('install_after_cancel_reports_real_failures_again', async () => {
+    currentBackend = 'bango_ai';
+    let rejectInstall!: (error: Error) => void;
+    mockInvoke.mockImplementation((command: string, args?: { backend?: string }) => {
+      if (command === 'install_bango_ai') {
+        return new Promise((_resolve, reject) => {
+          rejectInstall = reject;
+        });
+      }
+      if (command === 'set_llm_backend') {
+        currentBackend = args?.backend ?? currentBackend;
+        return Promise.resolve(undefined);
+      }
+      if (command === 'get_llm_backend') return Promise.resolve(currentBackend);
+      if (command === 'get_bango_ai_status')
+        return Promise.resolve({ ...STATUS, backend: currentBackend });
+      return Promise.resolve(commandResponse(command));
+    });
+
+    await runInScope(async () => {
+      const api = useBangoAi();
+      const first = api.install(true);
+      await api.cancelInstall();
+      rejectInstall(new Error('cancelled'));
+      await first;
+
+      mockInvoke.mockImplementation((command: string) => {
+        if (command === 'install_bango_ai') return Promise.reject(new Error('disk full'));
+        if (command === 'get_llm_backend') return Promise.resolve(currentBackend);
+        if (command === 'get_bango_ai_status')
+          return Promise.resolve({ ...STATUS, backend: currentBackend });
+        return Promise.resolve(commandResponse(command));
+      });
+      await expect(api.install(true)).rejects.toThrow('disk full');
+      expect(api.error.value).toContain('disk full');
+    });
+  });
+
   it('shared_backend_ref_keeps_panels_in_sync', async () => {
     await runInScope(async () => {
       const first = useBangoAi();

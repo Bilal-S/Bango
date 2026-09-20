@@ -218,8 +218,12 @@ replaces the provider configuration with the Bango AI panel while Bango AI is
 selected or installing (the provider card returns the moment Configured
 Provider is selected); choosing Bango AI before components are ready opens
 `bango-ai-consent-dialog.vue`, and activation persists only after the
-install self-test), `settings-bango-ai-card.vue` (Bango AI panel: status +
-busy note, stage-labelled monotonic progress with Cancel, set-up pitch with
+install self-test; cancelling the consent dialog or an in-flight install
+reverts the selection to Configured Provider with no error - see the radio
+selection contract below), `settings-bango-ai-card.vue` (Bango AI panel: status +
+busy note, stage-labelled monotonic progress with Cancel (clears the
+progress UI immediately and lets the selection revert; the cancelled
+command rejection is suppressed), set-up pitch with
 download/disk/memory lines and warning reasons, unsupported blocked state
 with no cloud-fallback wording, Test Bango AI timings, Advanced
 context/threads/reasoning, Verify Installation + two-step Remove with the
@@ -229,9 +233,10 @@ provider card: "Embedding Provider" radio - Configured Provider vs Bango
 Local - where selecting Bango Local before a healthy install opens
 `embeddings-consent-dialog.vue` first (what runs locally, download size from
 the status payload, Gemma terms link via `openUrl`, Download and Enable /
-Cancel with Escape-to-cancel + cancel-button focus; Cancel leaves the
-selection unchanged); install/repair progress from `embedding:component`
-events with overall % + Cancel; repair banner for `repair_required` OR a
+Cancel with Escape-to-cancel + cancel-button focus; Cancel reverts the
+selection); install/repair progress from `embedding:component`
+events with overall % + Cancel (reverts the persisted backend to Configured
+Provider); repair banner for `repair_required` OR a
 missing runtime (`runtimeReady` false); Component Details (expandable:
 profile, model + 768 dims, ONNX Runtime version + CPU thread budget,
 installed size [computed whenever the profile dir exists], resolved paths,
@@ -259,6 +264,20 @@ the cascade phase; backend contract in
 `settings-notification-history.vue`, `settings-diagnostics.vue`. Shared card
 chrome lives in `settings-card-shared.css`.
 
+- Settings backend radios (`settings-ai-section.vue`,
+  `settings-embeddings.vue`) drive `:checked` from an explicit `selected`
+  ref, never straight from the shared backend ref. A native radio click
+  checks the DOM node, but Vue only re-patches a `checked` binding whose
+  expression value changed (runtime-core patchElement PROPS branch), so
+  binding to the backend leaves the clicked option visually stuck after a
+  consent cancel or a reverted switch. `selected` changes on every
+  click/revert and follows the shared backend via a watcher. Cancel
+  semantics: consent cancel and in-flight cancel both end at Configured
+  Provider with no error message; in-flight cancel also persists
+  `configured_provider` (for AI only when a local backend was already
+  active), and staging files stay resumable. The embeddings cloud radio is
+  checked only when its provider supports embeddings, so after a cancel
+  with an unsupported provider (Anthropic/Z.AI) no radio is active.
 - `citation-local-embeddings-dialog.vue`: the T7 contextual prompt in
   chat-view - fires when a Citation-Finder submit arrives with `bango_local`
   selected but `localReady` false. [Download and Continue] streams live

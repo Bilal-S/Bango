@@ -62,8 +62,10 @@ function api(): {
   status: { value: unknown };
   error: { value: string | null };
   installing: { value: boolean };
+  progress: { value: unknown };
   selectBackend: ReturnType<typeof vi.fn>;
   install: ReturnType<typeof vi.fn>;
+  cancelInstall: ReturnType<typeof vi.fn>;
 } {
   return mock.api as ReturnType<typeof api>;
 }
@@ -102,6 +104,7 @@ beforeEach(() => {
   api().status.value = NOT_INSTALLED;
   api().error.value = null;
   api().installing.value = false;
+  api().progress.value = null;
 });
 
 describe('settings-embeddings consent gating', () => {
@@ -133,6 +136,13 @@ describe('settings-embeddings consent gating', () => {
     expect(wrapper.findComponent({ name: 'EmbeddingsConsentDialog' }).exists()).toBe(false);
     expect(api().backend.value).toBe('configured_provider');
     expect(api().selectBackend).not.toHaveBeenCalled();
+    // The clicked radio must visually revert too (a Vue `:checked` binding
+    // whose value did not change is never re-patched).
+    const local = wrapper
+      .findAll('input[type="radio"]')
+      .find((r) => (r.element as HTMLInputElement).value === 'bango_local')!;
+    expect((cloudRadio(wrapper)!.element as HTMLInputElement).checked).toBe(true);
+    expect((local.element as HTMLInputElement).checked).toBe(false);
   });
 
   it('consent_confirm_selects_the_backend_then_installs', async () => {
@@ -236,6 +246,71 @@ describe('settings-embeddings consent gating', () => {
     resolveSelect();
     await flushPromises();
     expect((fieldset().element as HTMLFieldSetElement).disabled).toBe(false);
+  });
+
+  it('cancel_during_install_reverts_to_the_configured_provider_radio', async () => {
+    api().backend.value = 'bango_local';
+    api().installing.value = true;
+    api().progress.value = {
+      phase: 'downloading',
+      file: 'model_q4.onnx',
+      fileBytes: 1,
+      fileTotal: 2,
+      overallBytes: 1,
+      overallTotal: 2,
+      message: null,
+    };
+    // Production cancelInstall reverts the persisted backend to configured.
+    api().cancelInstall.mockImplementation(async () => {
+      api().backend.value = 'configured_provider';
+      api().installing.value = false;
+      api().progress.value = null;
+    });
+    const { wrapper } = await mountCard();
+    const cancel = wrapper.findAll('button').find((b) => b.text() === 'Cancel')!;
+    await cancel.trigger('click');
+    await flushPromises();
+
+    const local = wrapper
+      .findAll('input[type="radio"]')
+      .find((r) => (r.element as HTMLInputElement).value === 'bango_local')!;
+    expect(api().cancelInstall).toHaveBeenCalledTimes(1);
+    expect((cloudRadio(wrapper)!.element as HTMLInputElement).checked).toBe(true);
+    expect((local.element as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('cancel_during_install_leaves_no_radio_active_for_unsupported_providers', async () => {
+    api().backend.value = 'bango_local';
+    api().installing.value = true;
+    api().progress.value = {
+      phase: 'downloading',
+      file: 'model_q4.onnx',
+      fileBytes: 1,
+      fileTotal: 2,
+      overallBytes: 1,
+      overallTotal: 2,
+      message: null,
+    };
+    api().cancelInstall.mockImplementation(async () => {
+      api().backend.value = 'configured_provider';
+      api().installing.value = false;
+      api().progress.value = null;
+    });
+    const { wrapper } = await mountCard();
+    useLlmConfigStore().config.provider = 'anthropic';
+    await flushPromises();
+
+    const cancel = wrapper.findAll('button').find((b) => b.text() === 'Cancel')!;
+    await cancel.trigger('click');
+    await flushPromises();
+
+    const cloud = cloudRadio(wrapper)!;
+    const local = wrapper
+      .findAll('input[type="radio"]')
+      .find((r) => (r.element as HTMLInputElement).value === 'bango_local')!;
+    expect((cloud.element as HTMLInputElement).checked).toBe(false);
+    expect((local.element as HTMLInputElement).checked).toBe(false);
+    expect(wrapper.text()).toContain('Anthropic does not support embeddings.');
   });
 });
 

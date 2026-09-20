@@ -78,6 +78,10 @@ export function useLocalEmbeddings() {
   const installing = ref(false);
   const verifying = ref(false);
   const removing = ref(false);
+  /** Set while the user is cancelling: the in-flight command's rejection is a
+   *  deliberate cancel, not a failure, so `install()` stays silent. Reset when
+   *  the next install starts. */
+  const cancelRequested = ref(false);
 
   let unlisten: (() => void) | null = null;
   let listenPromise: Promise<void> | null = null;
@@ -180,10 +184,14 @@ export function useLocalEmbeddings() {
     installing.value = true;
     progress.value = null;
     error.value = null;
+    cancelRequested.value = false;
     try {
       await tauriCommand('install_local_embeddings');
       await loadStatus();
     } catch (e) {
+      /* A deliberate cancel resolves silently; cancelInstall already cleared
+      the UI and reverted the selection, so no red error is shown. */
+      if (cancelRequested.value) return;
       error.value = String(e);
       throw e;
     } finally {
@@ -191,9 +199,24 @@ export function useLocalEmbeddings() {
     }
   }
 
-  /** Request cancellation of a running install (takes effect in-flight). */
+  /**
+   * Cancel a running install: clear the progress UI, stop the backend
+   * download (staging stays for resume), and return the persisted backend to
+   * Configured Provider so a cancel never leaves `bango_local` selected
+   * without installed components. The cancelled command rejection is
+   * suppressed by `install()`.
+   */
   async function cancelInstall(): Promise<void> {
+    cancelRequested.value = true;
+    installing.value = false;
+    progress.value = null;
+    error.value = null;
     await tauriCommand('cancel_local_embeddings_install');
+    try {
+      await selectBackend('configured_provider');
+    } catch (e) {
+      error.value = String(e);
+    }
   }
 
   /** Full SHA-256 + runtime verification. */

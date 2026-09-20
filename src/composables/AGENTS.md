@@ -64,13 +64,22 @@ views, LLM config, wiki, dashboard, saved reports, and the startup upgrade.
   `use-embedding-settings.ts` (premium embedding-model override load/save;
   `isPersisted` marks backend-known values so auto-save watchers skip
   propagation, never user edits - contract in `components/AGENTS.md`),
+  `use-bango-ai.ts` (the Bango AI panel's state: shared backend/install/
+  progress refs, status + install/test/verify/remove + the
+  `bango_ai:component` listener; terminal `done`/`error` events clear
+  `installing`, reload the status, and refresh the canonical gate;
+  `cancelInstall` clears the progress UI immediately, suppresses the
+  cancelled command rejection (no error), and reverts the persisted backend
+  to `configured_provider` when a local backend was active),
   `use-local-embeddings.ts` (the Embeddings card's state: backend selection
   + local component status + install/cancel/verify/remove + the
   `embedding:component` progress listener, one `listen` per scope released
   on dispose; the `backend` ref is MODULE-LEVEL shared state so the
   Embeddings card and the provider card's override field see switches
   immediately; terminal `done`/`error` events clear `installing` and reload
-  the status),
+  the status; `cancelInstall` clears the progress UI, suppresses the
+  cancelled rejection, and persists `configured_provider` so a cancelled
+  download never leaves `bango_local` selected without components),
   `use-citation-finder-chat.ts` (chat-view's Citation Finder orchestration:
   readiness + backend-aware toggle state/title with the stale-disabled
   self-heal, the submit pipeline - contextual local-embeddings prompt ->

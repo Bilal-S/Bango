@@ -41,6 +41,11 @@ beforeEach(() => {
   backendRef().value = 'configured_provider';
   (mocked.state.installing as Ref<boolean>).value = false;
   (mocked.state.error as Ref<string | null>).value = null;
+  (mocked.state.status as Ref<unknown>).value = {
+    state: 'ready',
+    supportedTarget: true,
+    model: 'Qwen3.5 2B',
+  };
 });
 
 describe('settings-backend-selection', () => {
@@ -97,5 +102,45 @@ describe('settings-backend-selection', () => {
     expect(wrapper.find('.provider-stub').exists()).toBe(false);
     const bangoRadio = wrapper.findAll('input[type="radio"]')[1]!.element as HTMLInputElement;
     expect(bangoRadio.checked).toBe(true);
+  });
+
+  it('consent_cancel_reverts_the_radio_to_configured_provider', async () => {
+    (mocked.state.status as Ref<unknown>).value = { state: 'not_installed', supportedTarget: true };
+    const wrapper = mount(SettingsAiSection);
+    await flushPromises();
+    const [cloud, bango] = wrapper.findAll('input[type="radio"]');
+
+    await bango!.setValue();
+    expect((bango!.element as HTMLInputElement).checked).toBe(true);
+    expect(wrapper.findComponent({ name: 'BangoAiConsentDialog' }).exists()).toBe(true);
+
+    wrapper.findComponent({ name: 'BangoAiConsentDialog' }).vm.$emit('cancel');
+    await flushPromises();
+
+    expect(wrapper.findComponent({ name: 'BangoAiConsentDialog' }).exists()).toBe(false);
+    expect((cloud!.element as HTMLInputElement).checked).toBe(true);
+    expect((bango!.element as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('install_cancel_reverts_the_radio_to_configured_provider', async () => {
+    (mocked.state.status as Ref<unknown>).value = { state: 'not_installed', supportedTarget: true };
+    const wrapper = mount(SettingsAiSection);
+    await flushPromises();
+    const [cloud, bango] = wrapper.findAll('input[type="radio"]');
+
+    // Reproduce the native click: Bango AI is checked, cloud is not.
+    await bango!.setValue();
+    wrapper.findComponent({ name: 'BangoAiConsentDialog' }).vm.$emit('confirm');
+    (mocked.state.installing as Ref<boolean>).value = true;
+    await flushPromises();
+    expect((bango!.element as HTMLInputElement).checked).toBe(true);
+    expect((cloud!.element as HTMLInputElement).checked).toBe(false);
+
+    // Cancelling the install clears `installing` before the backend moves.
+    (mocked.state.installing as Ref<boolean>).value = false;
+    await flushPromises();
+
+    expect((cloud!.element as HTMLInputElement).checked).toBe(true);
+    expect((bango!.element as HTMLInputElement).checked).toBe(false);
   });
 });

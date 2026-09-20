@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue';
+import { computed, ref, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useLlmConfigStore } from '@/stores/llm-config';
 import { useLocalEmbeddings, type EmbeddingBackendId } from '@/composables/use-local-embeddings';
@@ -70,6 +70,21 @@ const cloudOptionHint = computed(() =>
 
 /** Whether the consent dialog is open (pending switch to Bango Local). */
 const showConsent = ref(false);
+
+/**
+ * Explicit radio state: a native click checks the radio, but Vue never
+ * re-patches a `checked` binding whose value did not change, so a consent
+ * cancel would leave the clicked option stuck. `selected` changes on every
+ * click/revert and otherwise follows the shared backend.
+ */
+const selected = ref<EmbeddingBackendId>(backend.value);
+
+watch(
+  () => backend.value,
+  (next) => {
+    selected.value = next;
+  }
+);
 /** Component Details expansion. */
 const detailsOpen = ref(false);
 /** A backend switch is persisting (radios disabled so it cannot double-fire). */
@@ -136,14 +151,16 @@ function formatMb(bytes: number): string {
  */
 async function onBackendChange(value: EmbeddingBackendId): Promise<void> {
   actionError.value = null;
+  selected.value = value;
   if (value === 'bango_local' && !readyForUse.value) {
-    showConsent.value = true; // radio visually reverts until confirmed
+    showConsent.value = true; // cancel reverts `selected` to the backend
     return;
   }
   switching.value = true;
   try {
     await selectBackend(value);
   } catch (e) {
+    selected.value = backend.value;
     actionError.value = String(e);
   } finally {
     switching.value = false;
@@ -163,6 +180,7 @@ async function onConsentConfirm(): Promise<void> {
 
 function onConsentCancel(): void {
   showConsent.value = false;
+  selected.value = backend.value;
 }
 
 /**
@@ -234,13 +252,15 @@ async function onRemove(): Promise<void> {
       <legend class="emb-options__legend">Embedding Provider</legend>
       <label
         class="emb-option"
-        :class="{ 'emb-option--active': backend === 'configured_provider' }"
+        :class="{
+          'emb-option--active': selected === 'configured_provider' && !cloudOptionDisabled,
+        }"
       >
         <input
           type="radio"
           name="embedding-backend"
           value="configured_provider"
-          :checked="backend === 'configured_provider'"
+          :checked="selected === 'configured_provider' && !cloudOptionDisabled"
           :disabled="cloudOptionDisabled"
           @change="onBackendChange('configured_provider')"
         />
@@ -251,12 +271,12 @@ async function onRemove(): Promise<void> {
           </span>
         </span>
       </label>
-      <label class="emb-option" :class="{ 'emb-option--active': backend === 'bango_local' }">
+      <label class="emb-option" :class="{ 'emb-option--active': selected === 'bango_local' }">
         <input
           type="radio"
           name="embedding-backend"
           value="bango_local"
-          :checked="backend === 'bango_local'"
+          :checked="selected === 'bango_local'"
           :disabled="status?.supportedTarget === false"
           @change="onBackendChange('bango_local')"
         />

@@ -86,6 +86,8 @@ marker in the test file identifies un-implemented rows.
 | `src/__tests__/composables/use-bango-ai.test.ts::loads_status_and_subscribes_to_component_events` | One listener per scope, released on dispose |
 | `src/__tests__/composables/use-bango-ai.test.ts::install_success_refreshes_status_and_clears_installing` | Terminal done event refreshes and clears progress state |
 | `src/__tests__/composables/use-bango-ai.test.ts::install_failure_sets_error_and_rethrows` | Failures surface to the card and rethrow |
+| `src/__tests__/composables/use-bango-ai.test.ts::cancel_install_switches_to_configured_provider_and_suppresses_the_cancel_error` | Cancel clears installing/progress, persists configured_provider when local was active, and the cancelled rejection resolves silently |
+| `src/__tests__/composables/use-bango-ai.test.ts::install_after_cancel_reports_real_failures_again` | The cancel flag resets per install: a later real failure still sets error and rethrows |
 | `src/__tests__/composables/use-bango-ai.test.ts::shared_backend_ref_keeps_panels_in_sync` | Panel switching and selection stay consistent through the shared ref |
 | `src/__tests__/composables/use-bango-ai.test.ts::test_connection_reports_throughput_as_info` | Model-load, first-response, and tokens/s timings are exposed as information without gating |
 | `src/__tests__/composables/use-bango-ai.test.ts::terminal_install_event_refreshes_llm_config_gate` | Terminal install events and backend switches refresh the canonical llm-config gate |
@@ -96,6 +98,8 @@ marker in the test file identifies un-implemented rows.
 | `src/__tests__/components/settings-backend-selection.test.ts::selection_header_switches_provider_and_bango_ai` | Radio selection persists the backend and expands the right panel without unmounting the provider card |
 | `src/__tests__/components/settings-backend-selection.test.ts::provider_selection_persists_configured_provider` | Choosing Configured Provider persists llm_backend = configured_provider |
 | `src/__tests__/components/settings-backend-selection.test.ts::consent_install_shows_progress_card_before_activation` | A consent-triggered install mounts the progress card and its error without the backend being selected |
+| `src/__tests__/components/settings-backend-selection.test.ts::consent_cancel_reverts_the_radio_to_configured_provider` | Cancelling the consent dialog visually reverts the clicked Bango AI radio to Configured Provider |
+| `src/__tests__/components/settings-backend-selection.test.ts::install_cancel_reverts_the_radio_to_configured_provider` | Cancelling an in-flight install checks the Configured Provider radio and unchecks Bango AI |
 | `src/__tests__/components/settings-bango-ai-card.test.ts::restored_selection_without_components_offers_setup_or_switch` | The not-set-up state offers Set Up / Use Configured Provider and triggers nothing automatic |
 | `src/__tests__/components/bango-ai-consent-dialog.test.ts::shows_model_size_and_license_and_emits_confirm` | Consent names the model, size, MIT link, and emits confirm/cancel |
 | `src/__tests__/components/help-tab-reference.test.ts::renders_bango_ai_section_below_embeddings` | Help section exists in order with non-technical content |

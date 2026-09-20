@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import SettingsProviderCard from '@/components/settings/settings-provider-card.vue';
 import SettingsBangoAiCard from '@/components/settings/settings-bango-ai-card.vue';
 import BangoAiConsentDialog from '@/components/settings/bango-ai-consent-dialog.vue';
 import { useBangoAi } from '@/composables/use-bango-ai';
+import type { LlmBackendId } from '@/stores/llm-config';
 
 /**
  * Provider section wrapper: the backend selection header plus the existing
@@ -17,6 +18,19 @@ const { backend, status, switching, installing, error, load, selectBackend, inst
 
 const showConsent = ref(false);
 
+/**
+ * Explicit radio state: a native click checks the radio, but Vue never
+ * re-patches a `checked` binding whose value did not change, so a consent
+ * cancel or a cancelled install would leave the clicked option stuck.
+ * `selected` changes on every click and revert; it otherwise follows the
+ * shared backend, showing Bango AI while an install is in flight.
+ */
+const selected = ref<LlmBackendId>(installing.value ? 'bango_ai' : backend.value);
+
+watch([() => backend.value, () => installing.value], ([next, isInstalling]) => {
+  selected.value = isInstalling ? 'bango_ai' : next;
+});
+
 const consentModel = computed(() => status.value?.model ?? 'Qwen3.5 2B');
 const consentBytes = computed(() => status.value?.downloadBytes ?? 0);
 const consentLicense = computed(() => status.value?.license ?? 'MIT');
@@ -24,10 +38,24 @@ const consentLicenseUrl = computed(() => status.value?.licenseUrl ?? '');
 
 onMounted(load);
 
+async function onSelectConfiguredProvider(): Promise<void> {
+  selected.value = 'configured_provider';
+  try {
+    await selectBackend('configured_provider');
+  } catch {
+    selected.value = backend.value;
+  }
+}
+
 async function onSelectBangoAi(): Promise<void> {
+  selected.value = 'bango_ai';
   if (backend.value === 'bango_ai' || installing.value) return;
   if (status.value?.state === 'ready') {
-    await selectBackend('bango_ai');
+    try {
+      await selectBackend('bango_ai');
+    } catch {
+      selected.value = backend.value;
+    }
     return;
   }
   showConsent.value = true;
@@ -35,12 +63,19 @@ async function onSelectBangoAi(): Promise<void> {
 
 async function onConsentConfirm(): Promise<void> {
   showConsent.value = false;
+  selected.value = 'bango_ai';
   try {
     // The install activates (persists bango_ai) only after the self-test.
     await install(true);
   } catch {
     // Error surfaced by the composable.
+    selected.value = backend.value;
   }
+}
+
+function onConsentCancel(): void {
+  showConsent.value = false;
+  selected.value = backend.value;
 }
 </script>
 
@@ -48,29 +83,29 @@ async function onConsentConfirm(): Promise<void> {
   <section class="ai-section" aria-label="AI backend selection">
     <h2 class="ai-section__title">Choose how Bango runs AI</h2>
     <div class="ai-section__options">
-      <label class="ai-section__option" :class="{ 'is-active': backend === 'configured_provider' }">
+      <label
+        class="ai-section__option"
+        :class="{ 'is-active': selected === 'configured_provider' }"
+      >
         <input
           type="radio"
           name="llm-backend"
           value="configured_provider"
-          :checked="backend === 'configured_provider'"
+          :checked="selected === 'configured_provider'"
           :disabled="switching"
-          @change="selectBackend('configured_provider')"
+          @change="onSelectConfiguredProvider"
         />
         <span>
           <strong>Configured Provider</strong>
           <small>Uses your selected AI provider (cloud or a local server you run).</small>
         </span>
       </label>
-      <label
-        class="ai-section__option"
-        :class="{ 'is-active': backend === 'bango_ai' || installing }"
-      >
+      <label class="ai-section__option" :class="{ 'is-active': selected === 'bango_ai' }">
         <input
           type="radio"
           name="llm-backend"
           value="bango_ai"
-          :checked="backend === 'bango_ai' || installing"
+          :checked="selected === 'bango_ai'"
           :disabled="switching"
           @change="onSelectBangoAi"
         />
@@ -104,7 +139,7 @@ async function onConsentConfirm(): Promise<void> {
       :license="consentLicense"
       :license-url="consentLicenseUrl"
       @confirm="onConsentConfirm"
-      @cancel="showConsent = false"
+      @cancel="onConsentCancel"
     />
   </section>
 </template>

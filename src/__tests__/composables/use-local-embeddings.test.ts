@@ -219,6 +219,70 @@ describe('use-local-embeddings', () => {
     dispose?.();
   });
 
+  it('cancel_install_reverts_backend_and_suppresses_the_error', async () => {
+    const api = make();
+    await api.selectBackend('bango_local');
+    expect(api.backend.value).toBe('bango_local');
+
+    let rejectInstall!: (error: Error) => void;
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === 'install_local_embeddings') {
+        return new Promise((_resolve, reject) => {
+          rejectInstall = reject;
+        });
+      }
+      if (command === 'set_embedding_backend') return Promise.resolve('configured_provider');
+      return Promise.resolve(commandResponse(command));
+    });
+
+    const installPromise = api.install();
+    expect(api.installing.value).toBe(true);
+
+    await api.cancelInstall();
+
+    expect(mockInvoke).toHaveBeenCalledWith('cancel_local_embeddings_install');
+    expect(api.installing.value).toBe(false);
+    expect(api.progress.value).toBeNull();
+    expect(api.backend.value).toBe('configured_provider');
+    expect(mockInvoke).toHaveBeenCalledWith('set_embedding_backend', {
+      backend: 'configured_provider',
+    });
+
+    rejectInstall(new Error('Cancelled'));
+    await expect(installPromise).resolves.toBeUndefined();
+    expect(api.error.value).toBeNull();
+    dispose?.();
+  });
+
+  it('install_after_cancel_reports_real_failures_again', async () => {
+    const api = make();
+    await api.selectBackend('bango_local');
+
+    let rejectInstall!: (error: Error) => void;
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === 'install_local_embeddings') {
+        return new Promise((_resolve, reject) => {
+          rejectInstall = reject;
+        });
+      }
+      return Promise.resolve(commandResponse(command));
+    });
+
+    const first = api.install();
+    await api.cancelInstall();
+    rejectInstall(new Error('Cancelled'));
+    await first;
+
+    mockInvoke.mockImplementation((command: string) =>
+      command === 'install_local_embeddings'
+        ? Promise.reject(new Error('Not enough disk space'))
+        : Promise.resolve(commandResponse(command))
+    );
+    await expect(api.install()).rejects.toThrow('Not enough disk space');
+    expect(api.error.value).toContain('Not enough disk space');
+    dispose?.();
+  });
+
   it('verify_stores_outcome_remove_reloads_status', async () => {
     const api = make();
     const outcome = await api.verify();

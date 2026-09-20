@@ -104,6 +104,8 @@ or explicitly with `-- --ignored` plus their documented env-var artifacts.
 | `src/__tests__/composables/use-local-embeddings.test.ts::progress_events_update_and_terminal_done_refreshes_status` | Events drive `progress`; terminal `done` clears `installing` + reloads status |
 | `src/__tests__/composables/use-local-embeddings.test.ts::select_backend_persists_and_updates_shared_ref` | `set_embedding_backend` persists; the backend ref is shared across composable instances |
 | `src/__tests__/composables/use-local-embeddings.test.ts::install_reloads_status_failures_surface_in_error` | Install reloads status; failures set `error` + rethrow for the card |
+| `src/__tests__/composables/use-local-embeddings.test.ts::cancel_install_reverts_backend_and_suppresses_the_error` | Cancel clears installing/progress, persists configured_provider, and the cancelled rejection resolves silently |
+| `src/__tests__/composables/use-local-embeddings.test.ts::install_after_cancel_reports_real_failures_again` | The cancel flag resets per install: a later real failure still sets error and rethrows |
 | `src/__tests__/composables/use-local-embeddings.test.ts::verify_stores_outcome_remove_reloads_status` | Verify outcome stored; remove invokes the command + reloads |
 | `src/__tests__/composables/use-local-embeddings.test.ts::listener_resolving_after_scope_dispose_is_released_immediately` | A listener resolving after scope dispose is released immediately (leak regression) |
 | `src/__tests__/components/embeddings-consent-dialog.test.ts::renders_model_terms_and_live_download_size` | Consent dialog shows model, Gemma terms, and the live download size |
@@ -115,7 +117,9 @@ or explicitly with `-- --ignored` plus their documented env-var artifacts.
 | `src/__tests__/components/citation-local-embeddings-dialog.test.ts::emits_download_useCloud_and_cancel` | The three actions emit their events |
 | `src/__tests__/components/citation-local-embeddings-dialog.test.ts::renders_an_install_error_inline` | Install errors render inline for retry |
 | `src/__tests__/components/settings-embeddings.test.ts::selecting_bango_local_when_not_ready_opens_consent_without_persisting` | Not-ready + select local opens consent; nothing persisted until confirm |
-| `src/__tests__/components/settings-embeddings.test.ts::consent_cancel_closes_the_dialog_and_keeps_the_cloud_selection` | Cancel keeps the cloud selection |
+| `src/__tests__/components/settings-embeddings.test.ts::consent_cancel_closes_the_dialog_and_keeps_the_cloud_selection` | Cancel keeps the cloud selection and visually re-checks the Configured Provider radio |
+| `src/__tests__/components/settings-embeddings.test.ts::cancel_during_install_reverts_to_the_configured_provider_radio` | Cancelling an in-flight download re-checks Configured Provider and unchecks Bango Local |
+| `src/__tests__/components/settings-embeddings.test.ts::cancel_during_install_leaves_no_radio_active_for_unsupported_providers` | With Anthropic/Z.AI selected, a cancel leaves both radios unchecked (embeddings off) with the unsupported hint |
 | `src/__tests__/components/settings-embeddings.test.ts::consent_confirm_selects_the_backend_then_installs` | Confirm persists `bango_local` then starts the install |
 | `src/__tests__/components/settings-embeddings.test.ts::selecting_bango_local_when_ready_persists_without_the_dialog` | Ready install persists the selection with no consent dialog |
 | `src/__tests__/components/settings-embeddings.test.ts::shows_the_repair_banner_when_the_runtime_is_missing` | Missing runtime surfaces the repair banner |

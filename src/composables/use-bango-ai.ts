@@ -93,12 +93,18 @@ const sharedInstalling = ref(false);
 const sharedProgress = ref<BangoAiProgress | null>(null);
 const sharedError = ref<string | null>(null);
 
+/** Set while the user is cancelling: the in-flight command's rejection is a
+ *  deliberate cancel, not a failure, so `install()` and the terminal `error`
+ *  event stay silent. Reset when the next install starts. */
+const sharedCancelRequested = ref(false);
+
 /** Test-only reset for the module-level shared refs. */
 export function __resetSharedBackendForTests(): void {
   sharedBackend.value = 'configured_provider';
   sharedInstalling.value = false;
   sharedProgress.value = null;
   sharedError.value = null;
+  sharedCancelRequested.value = false;
 }
 
 /**
@@ -130,13 +136,21 @@ export function useBangoAi() {
   async function handleProgress(event: { payload: BangoAiProgress }): Promise<void> {
     progress.value = event.payload;
     if (event.payload.phase === 'done' || event.payload.phase === 'error') {
-      installing.value = false;
+      /* A cancelled install is not a failure: cancelInstall already cleared
+      the UI and reverted the selection, so the terminal error is dropped. */
+      if (event.payload.phase === 'error' && sharedCancelRequested.value) {
+        installing.value = false;
+        return;
+      }
       if (event.payload.phase === 'error') {
         error.value = event.payload.message ?? 'Bango AI setup failed.';
       } else {
         error.value = null;
       }
+      /* Reload before clearing `installing` so the selection watcher never
+      sees a stale backend mid-switch. */
       await loadStatus();
+      installing.value = false;
       // Activation/removal changed LLM usability: refresh the canonical gate.
       await llmConfigStore.refreshBackendState();
     }
@@ -213,20 +227,42 @@ export function useBangoAi() {
     installing.value = true;
     error.value = null;
     progress.value = null;
+    sharedCancelRequested.value = false;
     try {
       const outcome = await tauriCommand<BangoAiInstallOutcome>('install_bango_ai', { activate });
-      installing.value = false;
+      /* Reload before clearing `installing` so the selection watcher never
+      sees a stale backend mid-switch. */
       await loadStatus();
       return outcome;
     } catch (e) {
-      installing.value = false;
+      /* A deliberate cancel resolves silently; the section has already
+      reverted to Configured Provider and must not show a red error. */
+      if (sharedCancelRequested.value) return null;
       error.value = String(e);
       throw e;
+    } finally {
+      installing.value = false;
     }
   }
 
+  /**
+   * Cancel a running install: clear the progress UI immediately, stop the
+   * backend download (staging stays for resume), and return the selection to
+   * Configured Provider when the local backend was already persisted (repair
+   * path). The cancelled command rejection is suppressed by `install()`.
+   */
   async function cancelInstall(): Promise<void> {
+    sharedCancelRequested.value = true;
+    installing.value = false;
+    progress.value = null;
     await tauriCommand('cancel_bango_ai_install');
+    if (backend.value !== 'configured_provider') {
+      try {
+        await selectBackend('configured_provider');
+      } catch (e) {
+        error.value = String(e);
+      }
+    }
   }
 
   async function test(): Promise<BangoAiTestOutcome | null> {
