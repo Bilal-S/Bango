@@ -3,7 +3,7 @@ import { mount, flushPromises, enableAutoUnmount, type VueWrapper } from '@vue/t
 import { ref } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { createRouter, createMemoryHistory, type Router } from 'vue-router';
-import { makeArticle } from '../helpers/fixtures';
+import { makeArticle, shimLocalStorage } from '../helpers/fixtures';
 import type {
   CitationFinderProgress,
   CitationFinderReadiness,
@@ -129,6 +129,14 @@ function resetMockState(): void {
   mockInstall.mockClear();
   mockLocalLoad.mockClear();
   mockScrollAnchor.mockClear();
+  /* Fresh localStorage shim per test (happy-dom-safe): each mountChatView
+   * creates a fresh Pinia whose chat store restores the persisted mode
+   * (bango-chat-source) from localStorage; a leftover value from a
+   * previous test would leak its mode into the next mount. */
+  Object.defineProperty(window, 'localStorage', {
+    value: shimLocalStorage(),
+    configurable: true,
+  });
 }
 
 vi.mock('@/composables/use-tauri-command', () => ({
@@ -447,6 +455,119 @@ describe('chat-view.vue - welcome card hint actions', () => {
     await wrapper.findAll('button.chat-welcome-card__hint')[2]!.trigger('click');
     await flushPromises();
     expect(testRouter!.currentRoute.value.path).toBe('/settings');
+  });
+});
+
+describe('chat-view.vue - mode rail', () => {
+  beforeEach(() => {
+    resetMockState();
+  });
+
+  it('renders the persistent rail with the three mode toggles in order', async () => {
+    const wrapper = await mountAndSettle();
+    const rail = wrapper.find('.mode-rail');
+    expect(rail.exists()).toBe(true);
+    const buttons = rail.findAll('button');
+    /* Default state: wiki ready + citation enabled -> all three toggles. */
+    expect(buttons.length).toBe(3);
+    expect(buttons[0]!.attributes('title')).toBe('Add article context');
+    expect(buttons[1]!.classes()).toContain('wiki-toggle');
+    expect(buttons[2]!.classes()).toContain('citation-toggle');
+  });
+
+  it('marks the selected mode icon with the inverse-color active class', async () => {
+    const wrapper = await mountAndSettle();
+    /* Article mode: the (+) carries the selected treatment. */
+    expect(wrapper.find('.add-context-toggle').classes()).toContain('add-context-toggle--active');
+    expect(wrapper.find('.wiki-toggle').classes()).not.toContain('wiki-toggle--active');
+    /* Wiki mode: the halo moves to the wiki toggle, off the (+). */
+    await wrapper.find('.wiki-toggle').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('.add-context-toggle').classes()).not.toContain(
+      'add-context-toggle--active'
+    );
+    expect(wrapper.find('.wiki-toggle').classes()).toContain('wiki-toggle--active');
+    /* Citation mode: the citation toggle takes the selected treatment. */
+    await enterCitationMode(wrapper);
+    expect(wrapper.find('.citation-toggle').classes()).toContain('citation-toggle--active');
+    expect(wrapper.find('.wiki-toggle').classes()).not.toContain('wiki-toggle--active');
+  });
+
+  it('exits wiki mode via the rail wiki toggle', async () => {
+    const wrapper = await mountAndSettle();
+    const store = useChatStore();
+    await wrapper.find('.wiki-toggle').trigger('click');
+    await flushPromises();
+    expect(store.source).toBe('wiki');
+    /* The rail toggle is the discoverable exit back to article mode. */
+    await wrapper.find('.wiki-toggle').trigger('click');
+    await flushPromises();
+    expect(store.source).toBe('articles');
+  });
+
+  it('activates article mode from any mode: the (+) always opens the picker', async () => {
+    mockArticles.value = [makeArticle({ id: 'a1', title: 'Alpha Study' })];
+    const wrapper = await mountAndSettle();
+    const store = useChatStore();
+    const plus = () => wrapper.find('.add-context-toggle');
+    const pickerOpen = () => document.body.querySelector('.max-w-2xl') !== null;
+    const closePicker = async () => {
+      const done = document.body.querySelector('button.bg-indigo-600');
+      (done as HTMLButtonElement).click();
+      await flushPromises();
+    };
+
+    /* Wiki mode: the (+) is never disabled; clicking it switches back to
+     * article mode AND opens the picker. */
+    await wrapper.find('.wiki-toggle').trigger('click');
+    await flushPromises();
+    expect(store.source).toBe('wiki');
+    expect(plus().attributes('disabled')).toBeUndefined();
+    expect(plus().attributes('title')).toBe('Add article context');
+    await plus().trigger('click');
+    await flushPromises();
+    expect(store.source).toBe('articles');
+    expect(pickerOpen()).toBe(true);
+    await closePicker();
+
+    /* Citation mode: the same activation - back to article mode + picker. */
+    await enterCitationMode(wrapper);
+    expect(store.source).toBe('citation-finder');
+    await plus().trigger('click');
+    await flushPromises();
+    expect(store.source).toBe('articles');
+    expect(pickerOpen()).toBe(true);
+    /* The single-line chat input row is back. */
+    expect(wrapper.find('input[type="text"]').exists()).toBe(true);
+  });
+
+  it('keeps the rail mounted in citation mode and exits via the rail', async () => {
+    const wrapper = await mountAndSettle();
+    const store = useChatStore();
+    await enterCitationMode(wrapper);
+    /* The single-line chat input row is hidden (the citation area owns the
+     * input) but the rail stays mounted so the user can leave the mode. */
+    expect(wrapper.find('input[type="text"]').exists()).toBe(false);
+    expect(wrapper.find('.mode-rail').exists()).toBe(true);
+    await wrapper.find('.citation-toggle').trigger('click');
+    await flushPromises();
+    expect(store.source).toBe('articles');
+    expect(wrapper.find('input[type="text"]').exists()).toBe(true);
+  });
+
+  it('hides the wiki rail toggle when the wiki is not initialized', async () => {
+    mockWikiStatus.value = makeWikiStatus({ initialized: false, pageCount: 0 });
+    const wrapper = await mountAndSettle();
+    expect(wrapper.find('.mode-rail').findAll('button').length).toBe(2);
+  });
+
+  it('restores the persisted chat mode on a fresh store (navigation/restart)', async () => {
+    localStorage.setItem('bango-chat-source', 'wiki');
+    const wrapper = await mountAndSettle();
+    const store = useChatStore();
+    expect(store.source).toBe('wiki');
+    expect(wrapper.find('.wiki-banner').exists()).toBe(true);
+    expect(wrapper.find('.wiki-toggle').classes()).toContain('wiki-toggle--active');
   });
 });
 

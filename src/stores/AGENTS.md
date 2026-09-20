@@ -18,12 +18,21 @@ Pinia stores: chat, OpenAlex search state, LLM config.
 Pinia chat store. Holds `selectedArticleIds`, `messages`, `loading` (send
 failures surface as an `Error: ...` assistant bubble; the error ref itself is
 store-internal, not part of the public API),
-plus the retrieval-source state `source: 'articles'|'wiki'` (default
-`'articles'`; mutually exclusive) and `wikiReady` (drives the chat-view wiki
+plus the retrieval-source state `source: 'articles'|'wiki'` (mutually
+exclusive) and `wikiReady` (drives the chat-view wiki
 toggle visibility). `sendMessage(text)` branches: `source==='wiki'` calls
 `wiki_chat`; otherwise calls `send_chat_message`. Each pushed message records
 its `source` for bubble rendering. `toggleWikiMode()` flips the source;
 `clearChat()` resets it to `'articles'`.
+
+**Chat-mode (source) persistence**: `source` is restored from localStorage
+(`bango-chat-source`, validated load - any missing/invalid value falls back
+to `'articles'`) on store init and written through on every change via a
+sync-flush `watch`, so the selected mode survives both navigation (store
+singleton) and app restarts. `clearChat()`'s reset to `'articles'` persists
+too. A restored `'wiki'` whose wiki became unavailable self-heals in
+`use-chat-wiki`'s mount-time status check; a restored `'citation-finder'`
+on a blocked provider surfaces the existing disabled-provider banner.
 
 **Unsent-input draft persistence**: the store also holds `inputDraft` (the
 article/wiki chat `<input>` text) and `citationDraft` (the Citation Finder

@@ -451,6 +451,9 @@ The application uses a **"Scholarly Precision"** style: dense, minimalist Notion
 * **Chat View**: The empty-transcript welcome state shows three mode cards whose hint lines are clickable shortcuts that perform the action they describe (article picker dialog, wiki-mode toggle, the Wiki screen for an uninitialized wiki, Citation Finder mode, and Settings for provider-blocked hints).
   On every chat submit (article, wiki, or Citation Finder), the just-pushed user bubble is anchored to the top of the transcript scroll area via the same container-relative anchor as the Citation Finder result-arrival scroll (§8.7), so the bubble stays visible while the response streams in beneath it.
   The post-response scroll-to-bottom is unchanged.
+  The bottom interaction area is a two-column composer: a persistent vertical mode rail on the left holds the three round toggles - (+) article context (always active: from another mode it switches to article mode and opens the picker), Wiki, and Citation Finder - all mode activators, active whenever their background conditions permit, so every mode can be entered and exited from any mode; the selected mode's icon renders with inverse colors (indigo fill + white icon), including the (+) in article mode.
+  A thin vertical divider separates the rail from the per-mode content column (context strip, then the active input).
+  The selected mode persists across navigation and app restarts (localStorage `bango-chat-source`, validated load); a restored wiki that became unavailable self-heals back to article mode on mount, and Clear Chat resets to article mode.
 * **PRISMA 2020 Flow Diagram**: Four-phase SVG diagram (Identification, Screening, Eligibility, Included), exported through the `Export Diagram` dropdown button (menu items: `Export to PNG`, `Export SVG`).
   The `Export Data` button opens the shared export dialog (§10.2).
   The `Export Report` dropdown exports the Screening Reasons Report (§10.2) as Markdown or PDF.

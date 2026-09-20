@@ -205,14 +205,20 @@ async function handleSend() {
   scrollToBottom();
 }
 
-/* ── Welcome-card hint actions ──────────────────────────────────────────────
- * The empty-transcript welcome cards' hint lines are clickable; each emits
- * and the view performs the action the hint describes. The mode hints only
- * ever ENTER their mode (never toggle off), matching their "to start"
- * wording. */
+/* ── Mode-rail + welcome-card hint actions ──────────────────────────────────
+ * The rail icons are mode activators: always active whenever their
+ * background conditions permit (wiki present, LLM provider supports
+ * embeddings, ...). The empty-transcript welcome cards' hint lines reuse
+ * the same handlers. */
 
-/** Article card hint: open the article picker (mirrors the (+) button). */
-function onWelcomeOpenArticlePicker(): void {
+/**
+ * (+) rail button + article card hint: always active in every mode. From
+ * wiki/citation-finder mode it first switches chat back into article mode
+ * (`setSource('articles')` - the same exit path as the citation area's
+ * close), then opens the article picker.
+ */
+function onAddContext(): void {
+  if (chatStore.source !== 'articles') chatStore.setSource('articles');
   showSelector.value = true;
 }
 
@@ -319,7 +325,7 @@ onUnmounted(() => {
             v-if="chatStore.messages.length === 0"
             :wiki-ready="chatStore.wikiReady"
             :citation-toggle-state="citationToggleState"
-            @open-article-picker="onWelcomeOpenArticlePicker"
+            @open-article-picker="onAddContext"
             @toggle-wiki="onWelcomeToggleWiki"
             @open-wiki-screen="onWelcomeOpenWikiScreen"
             @activate-citation="onWelcomeActivateCitation"
@@ -343,128 +349,162 @@ onUnmounted(() => {
           />
         </div>
 
-        <!-- Context pills and Input area -->
+        <!-- Bottom interaction composer: two columns inside the panel.
+             Left: the persistent mode rail (the three round mode toggles,
+             always mounted so every mode can be entered and exited from any
+             mode - the old chat bar hid the (+) in wiki mode and the whole
+             bar in citation mode, which made exits undiscoverable).
+             Right: the per-mode context strip + input, separated from the
+             rail by a thin vertical divider (the column's left border).
+             Outer layout is CSS Grid: auto (fixed-width rail) +
+             minmax(0, 1fr) (content track). -->
         <div class="border-t border-slate-200 bg-white p-4">
-          <!-- Wiki-mode banner (replaces the article context picker) -->
-          <div v-if="chatStore.source === 'wiki'" class="mb-3">
-            <div class="wiki-banner flex items-center gap-2">
-              <span class="material-symbols-outlined text-[16px]">local_library</span>
-              <span class="text-xs font-semibold text-indigo-700"
-                >Wiki mode: answers are grounded by FTS5 search over your wiki pages.</span
-              >
+          <div class="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-4">
+            <!-- Mode rail (left column): the same round buttons from the old
+                 chat bar - moved, not recreated. The icons are mode
+                 activators, always active whenever their background
+                 conditions permit (wiki present, LLM provider supports
+                 embeddings); the (+) activates article mode from any mode
+                 and opens the article-context picker. -->
+            <div
+              class="mode-rail"
+              role="toolbar"
+              aria-label="Chat modes"
+              aria-orientation="vertical"
+            >
+              <!-- Plus button: an always-active mode activator. From
+                   wiki/citation-finder mode it switches chat back into
+                   article mode first, then opens the article-context
+                   picker. In article mode it carries the selected
+                   treatment (inverse colors), mirroring the other rail
+                   toggles' active state. -->
               <button
-                class="ml-auto text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold"
-                @click="router.push('/wiki')"
+                class="add-context-toggle flex items-center justify-center w-11 h-11 rounded-full border border-slate-200 bg-white text-indigo-600 transition-all active:scale-95 flex-shrink-0 hover:bg-slate-50"
+                :class="{ 'add-context-toggle--active': chatStore.source === 'articles' }"
+                title="Add article context"
+                @click="onAddContext"
               >
-                Open Wiki
+                <span class="material-symbols-outlined text-[24px]">add</span>
+              </button>
+
+              <!-- Wiki toggle button. Halo + indigo fill when active. -->
+              <button
+                v-if="chatStore.wikiReady"
+                class="wiki-toggle"
+                :class="{ 'wiki-toggle--active': chatStore.source === 'wiki' }"
+                :title="
+                  chatStore.source === 'wiki'
+                    ? 'Wiki mode active. Click to return to article context.'
+                    : 'Answer from your wiki knowledge base (FTS5 search)'
+                "
+                :aria-pressed="chatStore.source === 'wiki'"
+                @click="onToggleWiki"
+              >
+                <span class="material-symbols-outlined text-[24px]">local_library</span>
+              </button>
+
+              <!-- Citation Finder toggle button (3rd toggle). Visible-but-
+                   disabled on known-unsupported providers; hidden only when
+                   readiness has not loaded OR the LLM is not configured. -->
+              <button
+                v-if="citationToggleState !== 'hidden'"
+                class="citation-toggle"
+                :class="{
+                  'citation-toggle--active': isCitationMode,
+                  'citation-toggle--disabled': citationToggleState === 'disabled',
+                }"
+                :title="citationToggleTitle"
+                :aria-pressed="isCitationMode"
+                :disabled="citationToggleState === 'disabled'"
+                @click="onToggleCitationFinder"
+              >
+                <span class="material-symbols-outlined text-[24px]">quick_reference_all</span>
               </button>
             </div>
-          </div>
 
-          <!-- Citation Finder input area (replaces article-context pills +
-               single-line input). -->
-          <CitationInputArea
-            v-else-if="isCitationMode"
-            :readiness="chatStore.citationReadiness"
-            :toggle-state="citationToggleState"
-            :style-value="chatStore.citationStyle"
-            :mode="chatStore.citationFinderMode"
-            :statuses="citationStatuses"
-            :draft="chatStore.citationDraft"
-            :progress="chatStore.citationProgress"
-            :loading="chatStore.loading"
-            :cancelling="chatStore.cancelling"
-            @update:style="chatStore.setCitationStyle"
-            @update:mode="onSetCitationMode"
-            @update:statuses="onStatusesChange"
-            @update:draft="chatStore.citationDraft = $event"
-            @send="handleCitationSend"
-            @cancel="chatStore.cancelCitationSearch()"
-            @close="onToggleCitationFinder"
-            @open-settings="router.push('/settings')"
-          />
+            <!-- Main content column (right): fills the remaining horizontal
+                 space. The thin vertical divider is this column's left
+                 border; min-w-0 keeps long content (pills, banners, prose)
+                 from overflowing the grid track. Content keeps its existing
+                 order: context strip first, then the active input. -->
+            <div class="min-w-0 border-l border-slate-200 pl-5">
+              <!-- Wiki-mode banner (replaces the article context picker) -->
+              <div v-if="chatStore.source === 'wiki'" class="mb-3">
+                <div class="wiki-banner flex items-center gap-2">
+                  <span class="material-symbols-outlined text-[16px]">local_library</span>
+                  <span class="text-xs font-semibold text-indigo-700"
+                    >Wiki mode: answers are grounded by FTS5 search over your wiki pages.</span
+                  >
+                  <button
+                    class="ml-auto text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold"
+                    @click="router.push('/wiki')"
+                  >
+                    Open Wiki
+                  </button>
+                </div>
+              </div>
 
-          <!-- Selected articles panel (article mode only) -->
-          <SelectedArticlesBar
-            v-else
-            :articles="selectedArticles"
-            @open-detail="openArticleDetail"
-            @remove="chatStore.removeSelectedArticle"
-            @clear="chatStore.clearSelectedArticles"
-          />
-
-          <!-- Chat bar input container.
-               HIDDEN in citation-finder mode: the citation input area above
-               owns the active input (prose textarea + Find/progress), and the
-               mode toggles here are redundant. Wiki + article modes keep the
-               full chat bar. -->
-          <div v-if="!isCitationMode" class="flex items-center gap-3">
-            <!-- Plus button (article mode only; hidden in wiki mode) -->
-            <button
-              v-if="chatStore.source === 'articles'"
-              class="flex items-center justify-center w-10 h-10 rounded-full border border-slate-200 hover:bg-slate-50 text-indigo-600 transition-all active:scale-95 flex-shrink-0"
-              title="Add article context"
-              @click="showSelector = true"
-            >
-              <span class="material-symbols-outlined text-[24px]">add</span>
-            </button>
-
-            <!-- Wiki toggle button. Halo + indigo fill when active. -->
-            <button
-              v-if="chatStore.wikiReady"
-              class="wiki-toggle"
-              :class="{ 'wiki-toggle--active': chatStore.source === 'wiki' }"
-              :title="
-                chatStore.source === 'wiki'
-                  ? 'Wiki mode active. Click to return to article context.'
-                  : 'Answer from your wiki knowledge base (FTS5 search)'
-              "
-              :aria-pressed="chatStore.source === 'wiki'"
-              @click="onToggleWiki"
-            >
-              <span class="material-symbols-outlined text-[24px]">local_library</span>
-            </button>
-
-            <!-- Citation Finder toggle button (3rd toggle). Visible-but-
-                 disabled on known-unsupported providers; hidden only when
-                 readiness has not loaded OR the LLM is not configured. -->
-            <button
-              v-if="citationToggleState !== 'hidden'"
-              class="citation-toggle"
-              :class="{
-                'citation-toggle--active': isCitationMode,
-                'citation-toggle--disabled': citationToggleState === 'disabled',
-              }"
-              :title="citationToggleTitle"
-              :aria-pressed="isCitationMode"
-              :disabled="citationToggleState === 'disabled'"
-              @click="onToggleCitationFinder"
-            >
-              <span class="material-symbols-outlined text-[24px]">quick_reference_all</span>
-            </button>
-
-            <!-- Input field -->
-            <div class="flex-1 relative">
-              <input
-                v-model="chatStore.inputDraft"
-                type="text"
-                :placeholder="
-                  chatStore.source === 'wiki'
-                    ? 'Ask a question about your wiki...'
-                    : 'Ask a question about the selected articles...'
-                "
-                class="w-full pl-4 pr-12 py-2.5 rounded-full border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm transition-all"
-                @keydown.enter="handleSend"
+              <!-- Citation Finder input area (replaces article-context pills +
+                   single-line input). -->
+              <CitationInputArea
+                v-else-if="isCitationMode"
+                :readiness="chatStore.citationReadiness"
+                :toggle-state="citationToggleState"
+                :style-value="chatStore.citationStyle"
+                :mode="chatStore.citationFinderMode"
+                :statuses="citationStatuses"
+                :draft="chatStore.citationDraft"
+                :progress="chatStore.citationProgress"
+                :loading="chatStore.loading"
+                :cancelling="chatStore.cancelling"
+                @update:style="chatStore.setCitationStyle"
+                @update:mode="onSetCitationMode"
+                @update:statuses="onStatusesChange"
+                @update:draft="chatStore.citationDraft = $event"
+                @send="handleCitationSend"
+                @cancel="chatStore.cancelCitationSearch()"
+                @close="onToggleCitationFinder"
+                @open-settings="router.push('/settings')"
               />
 
-              <!-- Submit button -->
-              <button
-                class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center justify-center w-8 h-8 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 transition-colors cursor-pointer"
-                :disabled="!chatStore.inputDraft.trim() || chatStore.loading"
-                @click="handleSend"
-              >
-                <span class="material-symbols-outlined text-[18px]">send</span>
-              </button>
+              <!-- Selected articles panel (article mode only) -->
+              <SelectedArticlesBar
+                v-else
+                :articles="selectedArticles"
+                @open-detail="openArticleDetail"
+                @remove="chatStore.removeSelectedArticle"
+                @clear="chatStore.clearSelectedArticles"
+              />
+
+              <!-- Chat input row. HIDDEN in citation-finder mode: the
+                   citation input area above owns the active input (prose
+                   textarea + Find/progress). Wiki + article modes keep the
+                   single-line input. The mode toggles live in the rail. -->
+              <div v-if="!isCitationMode" class="flex items-center gap-3">
+                <!-- Input field -->
+                <div class="flex-1 relative">
+                  <input
+                    v-model="chatStore.inputDraft"
+                    type="text"
+                    :placeholder="
+                      chatStore.source === 'wiki'
+                        ? 'Ask a question about your wiki...'
+                        : 'Ask a question about the selected articles...'
+                    "
+                    class="w-full pl-4 pr-12 py-2.5 rounded-full border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm transition-all"
+                    @keydown.enter="handleSend"
+                  />
+
+                  <!-- Submit button -->
+                  <button
+                    class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center justify-center w-8 h-8 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 transition-colors cursor-pointer"
+                    :disabled="!chatStore.inputDraft.trim() || chatStore.loading"
+                    @click="handleSend"
+                  >
+                    <span class="material-symbols-outlined text-[18px]">send</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -581,13 +621,39 @@ onUnmounted(() => {
   animation: fade-in 0.3s ease-out forwards;
 }
 
-/* Wiki mode toggle button (right of the (+) icon). Halo + indigo fill when active. */
+/* Persistent mode rail (the composer's left column): the three round mode
+   toggles stacked vertically, top-aligned, horizontally centered, equal
+   12px gaps. Fixed width (the grid's auto column) as the panel resizes. */
+.mode-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem; /* 12px button gaps */
+  flex-shrink: 0;
+}
+
+/* Article-mode selected state: mirrors the wiki/citation active treatment
+   (inverse colors - indigo fill + white icon + halo) so the rail always
+   shows which mode is active. Doubled selector + :hover guard so it wins
+   over the button's inline Tailwind hover utilities. */
+.add-context-toggle.add-context-toggle--active,
+.add-context-toggle.add-context-toggle--active:hover {
+  background-color: rgb(99 102 241); /* indigo-600 */
+  border-color: rgb(79 70 229); /* indigo-700 */
+  color: #fff;
+  box-shadow:
+    0 0 0 3px rgb(199 210 254 / 0.9),
+    0 1px 2px rgb(15 23 42 / 0.08);
+}
+
+/* Wiki mode toggle button (mode rail). Halo + indigo fill when active.
+   44px round to match the rail's (+) button. */
 .wiki-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2.75rem;
+  height: 2.75rem;
   border-radius: 9999px;
   border: 1px solid rgb(203 213 225); /* slate-300 */
   background-color: #fff;
@@ -616,13 +682,14 @@ onUnmounted(() => {
     /* indigo-200 ring */ 0 1px 2px rgb(15 23 42 / 0.08);
 }
 
-/* Citation Finder toggle button (3rd toggle, mirrors .wiki-toggle). */
+/* Citation Finder toggle button (3rd rail toggle, mirrors .wiki-toggle;
+   44px round to match the rail's (+) button). */
 .citation-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2.75rem;
+  height: 2.75rem;
   border-radius: 9999px;
   border: 1px solid rgb(203 213 225); /* slate-300 */
   background-color: #fff;

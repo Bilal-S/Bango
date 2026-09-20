@@ -14,6 +14,7 @@ import { shimLocalStorage } from '../helpers/fixtures';
 
 const DEFAULTS = { working: true, included: true, rejected: false };
 const STORAGE_KEY = 'bango-citation-statuses';
+const SOURCE_KEY = 'bango-chat-source';
 
 describe('useChatStore - citation status persistence', () => {
   beforeEach(() => {
@@ -74,5 +75,53 @@ describe('useChatStore - citation status persistence', () => {
     await store.sendCitationSearch('Sugar is bad for you', ['working']);
 
     expect(store.citationProgress).toBeNull();
+  });
+});
+
+describe('useChatStore - chat source (mode) persistence', () => {
+  beforeEach(() => {
+    Object.defineProperty(window, 'localStorage', {
+      value: shimLocalStorage(),
+      configurable: true,
+    });
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('chat_source_default_and_persist', () => {
+    const store = useChatStore();
+    expect(store.source).toBe('articles');
+
+    store.setSource('citation-finder');
+    expect(localStorage.getItem(SOURCE_KEY)).toBe('citation-finder');
+
+    /* toggleWikiMode flips to wiki and writes through. */
+    store.toggleWikiMode();
+    expect(store.source).toBe('wiki');
+    expect(localStorage.getItem(SOURCE_KEY)).toBe('wiki');
+
+    // A fresh store (navigation in-session via the singleton, or an app
+    // restart reading localStorage) keeps the chosen mode.
+    setActivePinia(createPinia());
+    expect(useChatStore().source).toBe('wiki');
+  });
+
+  it('chat_source_invalid_storage_falls_back_to_articles', () => {
+    localStorage.setItem(SOURCE_KEY, 'banana');
+    setActivePinia(createPinia());
+    expect(useChatStore().source).toBe('articles');
+
+    /* A legacy/empty value behaves like no value at all. */
+    localStorage.setItem(SOURCE_KEY, '');
+    setActivePinia(createPinia());
+    expect(useChatStore().source).toBe('articles');
+  });
+
+  it('clearChat resets the source to articles and persists the reset', () => {
+    const store = useChatStore();
+    store.setSource('wiki');
+    store.clearChat();
+    expect(store.source).toBe('articles');
+    expect(localStorage.getItem(SOURCE_KEY)).toBe('articles');
   });
 });

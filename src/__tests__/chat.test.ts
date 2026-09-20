@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { useChatStore } from '@/stores/chat';
 import { tauriCommand } from '@/composables/use-tauri-command';
+import { shimLocalStorage } from './helpers/fixtures';
 
 vi.mock('@/composables/use-tauri-command', () => ({
   isTauri: () => true,
@@ -19,6 +20,13 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 describe('useChatStore', () => {
   beforeEach(() => {
+    /* Fresh localStorage shim per test (happy-dom-safe): the chat store
+     * restores the persisted chat mode (bango-chat-source) on init; a
+     * leftover value from a previous test would leak its mode here. */
+    Object.defineProperty(window, 'localStorage', {
+      value: shimLocalStorage(),
+      configurable: true,
+    });
     setActivePinia(createPinia());
     vi.clearAllMocks();
   });

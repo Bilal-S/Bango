@@ -23,6 +23,15 @@ Help, the Bibliometrics suite, and Diagnostics.
   `use-chat-article-context.ts`, transcript scrolling in
   `use-chat-transcript.ts` (see `composables/AGENTS.md`), and the heavy
   markup in the chat-view feature components (see `components/AGENTS.md`).
+  The bottom interaction composer keeps a persistent vertical mode rail
+  (CSS Grid `auto minmax(0,1fr)`: rail | divider | content column) holding
+  the (+) / Wiki / Citation Finder round toggles, always mounted so modes
+  can be switched from any mode; the rail icons are mode activators,
+  active whenever their background conditions permit - the (+)
+  (`.add-context-toggle`) switches to article mode and opens the picker
+  from any mode. The selected mode's icon renders with inverse colors
+  (indigo fill + white icon + halo): `.add-context-toggle--active` /
+  `.wiki-toggle--active` / `.citation-toggle--active`.
 - `wiki-view.vue` is the `/wiki` route (sidebar + viewer + editor + graph +
   article detail slide-over).
 

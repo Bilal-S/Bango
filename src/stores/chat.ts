@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import type { WikiChatMessage } from '@/types/wiki';
 import type {
@@ -21,6 +21,9 @@ type ChatSource = 'articles' | 'wiki' | 'citation-finder';
 
 /** localStorage key for the persisted Articles-to-Search selection. */
 const CITATION_STATUSES_STORAGE_KEY = 'bango-citation-statuses';
+
+/** localStorage key for the persisted retrieval-source (chat mode) selection. */
+const CHAT_SOURCE_STORAGE_KEY = 'bango-chat-source';
 
 /** Working + Included default ON, Rejected default OFF; duplicates excluded. */
 const DEFAULT_CITATION_STATUSES: CitationStatusFlags = {
@@ -64,14 +67,52 @@ export interface ChatMessage {
   citationStyle?: CitationStyle;
 }
 
+/**
+ * Read the persisted retrieval-source selection. Any missing key or
+ * unexpected value falls back to `'articles'` (never throws).
+ * @returns The restored chat mode.
+ */
+function loadChatSource(): ChatSource {
+  try {
+    const raw = localStorage.getItem(CHAT_SOURCE_STORAGE_KEY);
+    if (raw === 'articles' || raw === 'wiki' || raw === 'citation-finder') {
+      return raw;
+    }
+  } catch {
+    // Fall through to the default.
+  }
+  return 'articles';
+}
+
 export const useChatStore = defineStore('chat', () => {
   const selectedArticleIds = ref<string[]>([]);
   const messages = ref<ChatMessage[]>([]);
   const loading = ref(false);
   const error = ref<string | null>(null);
 
-  /** Active retrieval source. Mutually exclusive. */
-  const source = ref<ChatSource>('articles');
+  /** Active retrieval source. Mutually exclusive. Restored from the
+   * persisted selection so the chosen mode survives navigation (the store
+   * is a singleton) and app restarts (localStorage). A restored 'wiki'
+   * whose wiki became unavailable self-heals in `use-chat-wiki`'s
+   * mount-time status check; a restored 'citation-finder' on a blocked
+   * provider surfaces the existing disabled-provider banner. */
+  const source = ref<ChatSource>(loadChatSource());
+
+  /* Persist every source change (best-effort): one write-through covers
+   * setSource, toggleWikiMode, and clearChat's reset-to-articles. Sync
+   * flush so the persisted value never lags the in-memory selection
+   * (writes are rare user actions; no batching benefit). */
+  watch(
+    source,
+    (next) => {
+      try {
+        localStorage.setItem(CHAT_SOURCE_STORAGE_KEY, next);
+      } catch {
+        // Best-effort: the in-memory selection still applies this session.
+      }
+    },
+    { flush: 'sync' }
+  );
 
   /* Unsent chat input drafts. chat-view is NOT keep-alive cached (only
    * WikiView + ArticleList are), so the component unmounts on navigation
