@@ -95,6 +95,42 @@
         outline-offset: 3px;
         border-radius: 1rem;
       }
+      /* Click-to-play video trigger (hero demo) */
+      .video-trigger {
+        cursor: pointer;
+        display: block;
+      }
+      .video-trigger:focus-visible {
+        outline: 2px solid #6366f1;
+        outline-offset: 3px;
+        border-radius: 1rem;
+      }
+      .video-trigger__play {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 4rem;
+        height: 4rem;
+        border-radius: 9999px;
+        background: rgba(79, 70, 229, 0.92);
+        color: #fff;
+        box-shadow: 0 10px 30px -8px rgba(15, 23, 42, 0.5);
+        transition:
+          transform 0.2s ease,
+          background 0.2s ease;
+      }
+      .video-trigger__play svg {
+        margin-left: 0.2rem;
+      }
+      .video-trigger:hover .video-trigger__play,
+      .video-trigger:focus-visible .video-trigger__play {
+        transform: translate(-50%, -50%) scale(1.08);
+        background: #4f46e5;
+      }
       .zoomable__overlay {
         position: absolute;
         right: 0.75rem;
@@ -118,7 +154,9 @@
         backdrop-filter: blur(2px);
       }
       .zoomable:hover .zoomable__overlay,
-      .zoomable:focus-visible .zoomable__overlay {
+      .zoomable:focus-visible .zoomable__overlay,
+      .video-trigger:hover .zoomable__overlay,
+      .video-trigger:focus-visible .zoomable__overlay {
         opacity: 1;
         transform: translateY(0);
       }
@@ -166,6 +204,28 @@
       #lightbox.is-open img {
         transform: scale(1);
       }
+      /* Video mode: 16:9 player capped like the image (90vw / 82vh) */
+      .lightbox__video {
+        position: relative;
+        width: min(90vw, 82vh * 16 / 9);
+        aspect-ratio: 16 / 9;
+        overflow: hidden;
+        border-radius: 0.75rem;
+        background: #000;
+        box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.6);
+        transform: scale(0.97);
+        transition: transform 0.25s ease;
+      }
+      #lightbox.is-open .lightbox__video {
+        transform: scale(1);
+      }
+      .lightbox__video iframe {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
       .lightbox__caption {
         color: #e2e8f0;
         font-size: 0.875rem;
@@ -201,7 +261,9 @@
       @media (prefers-reduced-motion: reduce) {
         #lightbox,
         #lightbox img,
+        .lightbox__video,
         .lightbox__close,
+        .video-trigger__play,
         .zoomable__overlay {
           transition: none;
         }
@@ -482,40 +544,48 @@
             <div
               class="absolute -inset-4 rounded-3xl bg-gradient-to-tr from-indigo-100/50 to-slate-100/50 blur-2xl -z-10"
             ></div>
-            <!-- faux window chrome (click to enlarge) -->
+            <!-- faux window chrome (click to play demo video) -->
             <div
-              class="zoomable relative rounded-2xl border border-slate-200 bg-white p-2 shadow-window"
+              class="video-trigger relative rounded-2xl border border-slate-200 bg-white p-2 shadow-window"
               role="button"
               tabindex="0"
-              aria-label="Enlarge dashboard screenshot"
-              data-zoom="assets/dashboard.png"
-              data-caption="Bango dashboard showing review progress and article counts"
+              aria-label="Play Bango demo video"
+              data-video="z1Vu0Bb6pAw"
+              data-caption="Bango demo - AI-assisted systematic literature review walkthrough"
             >
               <div class="flex items-center gap-1.5 px-3 py-2">
                 <span class="h-3 w-3 rounded-full bg-red-400"></span>
                 <span class="h-3 w-3 rounded-full bg-amber-400"></span>
                 <span class="h-3 w-3 rounded-full bg-green-400"></span>
-                <span class="ml-3 text-xs font-medium text-slate-400">Bango - Dashboard</span>
+                <span class="ml-3 text-xs font-medium text-slate-400">Bango - Demo video</span>
               </div>
-              <img
-                src="assets/dashboard.png"
-                alt="Bango dashboard showing review progress and article counts"
-                class="rounded-lg w-full"
-              />
-              <span class="zoomable__overlay" aria-hidden="true"
-                ><svg
-                  class="h-3.5 w-3.5"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
+              <div class="relative">
+                <img
+                  src="https://i.ytimg.com/vi/z1Vu0Bb6pAw/maxresdefault.jpg"
+                  onerror="this.onerror=null;this.src='https://i.ytimg.com/vi/z1Vu0Bb6pAw/hqdefault.jpg';"
+                  alt="Bango demo video - AI-assisted literature review walkthrough"
+                  class="rounded-lg w-full aspect-video object-cover"
+                />
+                <span class="video-trigger__play" aria-hidden="true">
+                  <svg class="h-6 w-6" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M8 5.5v13l11-6.5L8 5.5z" />
+                  </svg>
+                </span>
+                <span class="zoomable__overlay" aria-hidden="true"
+                  ><svg
+                    class="h-3.5 w-3.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M10.3 8.7v6.6l5.4-3.3-5.4-3.3z" fill="currentColor" stroke="none" /></svg
+                  >Play video</span
                 >
-                  <circle cx="11" cy="11" r="7" />
-                  <path d="m21 21-4.3-4.3" /></svg
-                >Click to enlarge</span
-              >
+              </div>
             </div>
           </div>
         </div>
@@ -1107,10 +1177,10 @@
       id="lightbox"
       role="dialog"
       aria-modal="true"
-      aria-label="Enlarged image"
+      aria-label="Enlarged media"
       aria-hidden="true"
     >
-      <button class="lightbox__close" type="button" aria-label="Close enlarged image (Esc)">
+      <button class="lightbox__close" type="button" aria-label="Close enlarged view (Esc)">
         <svg
           class="h-5 w-5"
           viewBox="0 0 24 24"
@@ -1127,6 +1197,7 @@
       </button>
       <figure class="lightbox__figure">
         <img class="lightbox__img" src="" alt="" />
+        <div class="lightbox__video" hidden></div>
         <figcaption class="lightbox__caption"></figcaption>
       </figure>
     </div>
@@ -1202,6 +1273,8 @@
           var lbImg = lb.querySelector('.lightbox__img');
           var lbCaption = lb.querySelector('.lightbox__caption');
           var lbClose = lb.querySelector('.lightbox__close');
+          var lbVideo = lb.querySelector('.lightbox__video');
+          var lbVideoFrame = null;
           var lastFocused = null;
           var scrollLocked = false;
 
@@ -1215,10 +1288,8 @@
             }
           }
 
-          function openLightbox(src, caption) {
-            lastFocused = document.activeElement;
-            lbImg.src = src;
-            lbImg.alt = caption || '';
+          // Shared open mechanics: caption, overlay, scroll lock, focus.
+          function openOverlay(caption) {
             lbCaption.textContent = caption || '';
             lbCaption.style.display = caption ? '' : 'none';
             lb.classList.add('is-open');
@@ -1231,10 +1302,61 @@
             }
           }
 
+          // Image mode.
+          function openLightbox(src, caption) {
+            lastFocused = document.activeElement;
+            stopVideo();
+            if (lbVideo) {
+              lbVideo.hidden = true;
+            }
+            lbImg.style.display = '';
+            lbImg.src = src;
+            lbImg.alt = caption || '';
+            openOverlay(caption);
+          }
+
+          // Video mode: fresh YouTube iframe on the privacy-enhanced domain.
+          // Nothing loads from YouTube until the user clicks the placeholder.
+          function openVideo(id, caption) {
+            if (!lbVideo || !id) {
+              return;
+            }
+            lastFocused = document.activeElement;
+            stopVideo();
+            lbImg.style.display = 'none';
+            lbVideoFrame = document.createElement('iframe');
+            lbVideoFrame.setAttribute('title', caption || 'Video player');
+            lbVideoFrame.setAttribute(
+              'allow',
+              'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture'
+            );
+            lbVideoFrame.setAttribute('allowfullscreen', '');
+            // autoplay=1 starts playback right away; rel=0 keeps related videos on-channel.
+            lbVideoFrame.src = 'https://www.youtube-nocookie.com/embed/' + id + '?autoplay=1&rel=0';
+            lbVideo.appendChild(lbVideoFrame);
+            lbVideo.hidden = false;
+            openOverlay(caption);
+          }
+
+          // Remove the iframe entirely so playback and audio stop immediately.
+          function stopVideo() {
+            if (lbVideo) {
+              lbVideo.textContent = '';
+            }
+            lbVideoFrame = null;
+          }
+
           function closeLightbox() {
             lb.classList.remove('is-open');
             lb.setAttribute('aria-hidden', 'true');
             lockScroll(false);
+            // Stop any playing video right away; audio must not linger.
+            stopVideo();
+            if (lbVideo) {
+              lbVideo.hidden = true;
+            }
+            // Restore image mode for the next open.
+            lbImg.style.display = '';
             // Clear src after fade so the previous image doesn't linger
             setTimeout(function () {
               lbImg.src = '';
@@ -1244,8 +1366,16 @@
             }
           }
 
-          // Delegated click: open on any [data-zoom] trigger
+          // Delegated click: [data-video] triggers play, [data-zoom] enlarges
           document.addEventListener('click', function (e) {
+            var videoTrigger = e.target.closest('[data-video]');
+            if (videoTrigger) {
+              openVideo(
+                videoTrigger.getAttribute('data-video'),
+                videoTrigger.getAttribute('data-caption')
+              );
+              return;
+            }
             var trigger = e.target.closest('[data-zoom]');
             if (trigger) {
               openLightbox(trigger.getAttribute('data-zoom'), trigger.getAttribute('data-caption'));
@@ -1264,6 +1394,15 @@
 
           // Keyboard: Enter/Space opens from a trigger; Esc closes
           document.addEventListener('keydown', function (e) {
+            var videoTrigger = e.target.closest ? e.target.closest('[data-video]') : null;
+            if (videoTrigger && (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar')) {
+              e.preventDefault();
+              openVideo(
+                videoTrigger.getAttribute('data-video'),
+                videoTrigger.getAttribute('data-caption')
+              );
+              return;
+            }
             var trigger = e.target.closest ? e.target.closest('[data-zoom]') : null;
             if (trigger && (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar')) {
               e.preventDefault();

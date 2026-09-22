@@ -105,6 +105,11 @@ owning AGENTS.md; follow it for the detailed contracts. Create a child
   content to `help.html`, remove app-only interactivity (Vue router
   navigation, demo-project loader, scroll-spy) and replace CSS variables /
   Tailwind-scoped styles with plain CSS or self-contained utility classes.
+  The `index.html` hero is a click-to-play YouTube demo placeholder
+  (`data-video` trigger, YouTube thumbnail with `hqdefault` fallback) that
+  opens the shared lightbox in video mode (`youtube-nocookie.com` iframe
+  created on open, removed on close so playback stops); `data-zoom`
+  triggers keep the image lightbox path.
   Both pages carry a platform-adaptive top Download button (Windows ->
   Microsoft Store; macOS/Linux -> `#macos`/`#linux` anchors on the GitHub
   README) with a `?pf=windows|macos|linux` URL override for testing.
