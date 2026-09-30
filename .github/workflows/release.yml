@@ -25,7 +25,7 @@ jobs:
       matrix:
         platform:
           - windows-latest
-          - ubuntu-latest
+          - ubuntu-22.04
           - macos-latest
     steps:
       - name: Checkout repository
@@ -57,7 +57,7 @@ jobs:
         run: bash scripts/sync-version.sh "$VERSION"
 
       - name: Install Linux system dependencies
-        if: matrix.platform == 'ubuntu-latest'
+        if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
