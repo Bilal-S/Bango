@@ -9,7 +9,6 @@ coverage/
 
 # Rust / Cargo
 src-tauri/target/
-src-tauri/Cargo.lock
 scripts/**/target/
 
 # IDE
