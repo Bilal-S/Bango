@@ -56,8 +56,8 @@ pub fn process_screening_responses(raw: &str) -> Result<Vec<LlmScreeningResponse
                         );
                         return Ok(results);
                     }
-                    Err(recovery_err) => {
-                        debug_log!("[screening] object-shape recovery failed: {recovery_err}");
+                    Err(_recovery_err) => {
+                        debug_log!("[screening] object-shape recovery failed: {_recovery_err}");
                     }
                 }
             }

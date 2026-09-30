@@ -33,10 +33,10 @@
   },
   "dependencies": {
     "@sigma/export-image": "^3.0.0",
-    "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-dialog": "^2.7.3",
-    "@tauri-apps/plugin-fs": "^2.5.2",
-    "@tauri-apps/plugin-opener": "^2.5.5",
+    "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/plugin-dialog": "2.7.3",
+    "@tauri-apps/plugin-fs": "2.5.2",
+    "@tauri-apps/plugin-opener": "2.5.5",
     "apexcharts": "^5.16.0",
     "graphology": "^0.26.0",
     "graphology-communities-louvain": "^2.0.2",
@@ -85,5 +85,9 @@
     "*.{json,css,html}": [
       "prettier --write"
     ]
+  },
+  "allowScripts": {
+    "simple-git-hooks@2.14.0": true,
+    "skia-canvas@3.0.8": true
   }
 }
